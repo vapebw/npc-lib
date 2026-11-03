@@ -1,6 +1,5 @@
 /vendor/
 /work/
-/examples/consumer/vendor/
 /.phpunit.cache/
-
-/tests/bedrock-client/node_modules/
+/tests/harness/vendor/
+/tests/bedrock/node_modules/

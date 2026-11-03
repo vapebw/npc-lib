@@ -3,7 +3,7 @@
 NPC library for Quark API 6.0.0. PHP 8.4/8.5, namespace `NpcLib\`. Private, not published.
 
 - `NpcManager`: one per plugin, owns its NPCs and cleans them up on disable
-- `PlayerNpc` (human with skin) and `EntityNpc` (villager)
+- `PlayerNpc` (human with skin, equipment), `VillagerNpc` and `ZombieNpc` (armor), generic `EntityNpc` via `createMob()`
 - Name, visibility, invulnerability, cancellation, optional movement
 - Typed callbacks for interact, attack, damage and death
 
