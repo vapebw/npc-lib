@@ -5,8 +5,9 @@ parameters:
 	phpVersion: 80400
 	paths:
 		- src
-		- tests
-		- tools
+		- tests/unit
+		- tests/integration
+		- scripts
 	tmpDir: work/phpstan
 	scanDirectories:
 		- work/quark/src

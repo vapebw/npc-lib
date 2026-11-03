@@ -1,6 +1,6 @@
 {
   "name": "vapebw/npc-lib",
-  "description": "NPC library foundation for SukoMC",
+  "description": "NPC library for Quark API 6.0.0",
   "type": "library",
   "license": "proprietary",
   "require": {
@@ -19,7 +19,8 @@
   },
   "autoload-dev": {
     "psr-4": {
-      "NpcLibTests\\": "tests/"
+      "NpcLibTests\\Unit\\": "tests/unit/",
+      "NpcLibTests\\Integration\\": "tests/integration/"
     }
   },
   "extra": {
@@ -37,7 +38,7 @@
     }
   },
   "scripts": {
-    "lint": "@php tools/lint.php",
+    "lint": "@php scripts/lint.php",
     "test": "@php vendor/phpunit/phpunit/phpunit",
     "analyse": "@php vendor/phpstan/phpstan/phpstan analyse --no-progress",
     "check": [
@@ -47,12 +48,12 @@
       "@test",
       "@analyse"
     ],
-    "build:consumer": "@php -d phar.readonly=0 tools/build-consumer.php",
-    "test:phar": "@php tools/check-phar.php",
-    "analyse:consumer": "@php vendor/phpstan/phpstan/phpstan analyse -c phpstan-consumer.neon --no-progress",
+    "build:harness": "@php -d phar.readonly=0 scripts/build-harness.php",
+    "test:phar": "@php scripts/check-phar.php",
+    "analyse:harness": "@php vendor/phpstan/phpstan/phpstan analyse -c phpstan-harness.neon --no-progress",
     "stage:package": [
       "@composer archive --format=tar --dir=work/dist --file=npc-lib",
-      "@php tools/stage-package.php"
+      "@php scripts/stage-package.php"
     ]
   },
   "archive": {
@@ -60,13 +61,13 @@
       "/work",
       "/vendor",
       "/tests",
-      "/tools",
-      "/examples",
-      "/docs",
+      "/scripts",
       "/composer.lock",
       "/phpstan*.neon",
       "/phpunit.xml",
-      "/.github",
+      "/.editorconfig",
+      "/.gitignore",
+      "/.gitattributes",
       "/.phpunit.cache"
     ]
   }

@@ -4,95 +4,93 @@ declare(strict_types=1);
 
 namespace NpcLib;
 
+use Closure;
+use InvalidArgumentException;
 use LogicException;
-use NpcLib\Internal\PlayerEntity;
-use NpcLib\Internal\VillagerEntity;
+use NpcLib\equipment\Equipment;
+use NpcLib\internal\dispatch\NpcEventRouter;
+use NpcLib\internal\entity\NpcEntity;
+use NpcLib\internal\entity\PlayerEntity;
+use NpcLib\internal\entity\VillagerEntity;
+use NpcLib\internal\entity\ZombieEntity;
+use NpcLib\npc\EntityNpc;
+use NpcLib\npc\Npc;
+use NpcLib\npc\PlayerNpc;
+use NpcLib\npc\VillagerNpc;
+use NpcLib\npc\ZombieNpc;
+use quark\entity\Human;
+use quark\entity\Living;
 use quark\entity\Location;
+use quark\entity\NeverSavedWithChunkEntity;
 use quark\entity\Skin;
-use quark\event\entity\EntityDamageEvent;
-use quark\event\entity\EntityDeathEvent;
-use quark\event\entity\EntityDespawnEvent;
-use quark\event\EventPriority;
-use quark\event\HandlerListManager;
-use quark\event\player\PlayerEntityInteractEvent;
-use quark\event\plugin\PluginDisableEvent;
-use quark\event\RegisteredListener;
 use quark\plugin\Plugin;
-use quark\Server;
+use ReflectionClass;
 use Throwable;
 
 final class NpcManager{
 	/** @var array<int, Npc> */
 	private array $npcs = [];
-	/** @var list<RegisteredListener<*>> */
-	private array $listeners = [];
+	private ?NpcEventRouter $router = null;
 	private ?Plugin $owner;
 
 	public function __construct(Plugin $owner){
-		$this->owner = $owner;
 		if(!$owner->isEnabled()){ throw new LogicException('NPC owner must be enabled'); }
-		$events = Server::getInstance()->getPluginManager();
-		try{
-			$this->listeners[] = $events->registerEvent(PluginDisableEvent::class, function(PluginDisableEvent $event) : void{
-				if($event->getPlugin() === $this->owner){ $this->close(); }
-			}, EventPriority::LOWEST, $owner);
-			$this->listeners[] = $events->registerEvent(EntityDespawnEvent::class, function(EntityDespawnEvent $event) : void{
-				$id = $event->getEntity()->getId();
-				$npc = $this->npcs[$id] ?? null;
-				unset($this->npcs[$id]);
-				$npc?->release(false);
-			}, EventPriority::LOWEST, $owner);
-			$this->listeners[] = $events->registerEvent(PlayerEntityInteractEvent::class, function(PlayerEntityInteractEvent $event) use ($owner) : void{
-				$npc = $this->get($event->getEntity()->getId());
-				if($npc === null){ return; }
-				try{ $npc->dispatchInteract($event); }
-				catch(Throwable $error){ $event->cancel(); $this->failedCallback($owner, $npc, $error); }
-			}, EventPriority::HIGHEST, $owner, true);
-			$this->listeners[] = $events->registerEvent(EntityDamageEvent::class, function(EntityDamageEvent $event) use ($owner) : void{
-				$npc = $this->get($event->getEntity()->getId());
-				if($npc === null){ return; }
-				try{ $npc->dispatchDamage($event); }
-				catch(Throwable $error){ $event->cancel(); $this->failedCallback($owner, $npc, $error); }
-			}, EventPriority::HIGHEST, $owner, true);
-			$this->listeners[] = $events->registerEvent(EntityDeathEvent::class, function(EntityDeathEvent $event) use ($owner) : void{
-				$npc = $this->get($event->getEntity()->getId());
-				if($npc === null){ return; }
-				try{ $npc->dispatchDeath($event); }
-				catch(Throwable $error){ $this->failedCallback($owner, $npc, $error); }
-			}, EventPriority::HIGHEST, $owner);
-		}catch(Throwable $error){ $this->close(); throw $error; }
+		$this->owner = $owner;
+		$this->router = new NpcEventRouter($this, $owner);
 	}
 
-	private function requireOwner() : Plugin{
+	private function requireOwner() : void{
 		if($this->owner === null || !$this->owner->isEnabled()){ throw new LogicException('NPC manager is closed or owner disabled'); }
-		return $this->owner;
 	}
 
-	public function createPlayer(Location $location, Skin $skin, string $name = '') : PlayerNpc{
+	public function createPlayer(Location $location, Skin $skin, string $name = '', ?Equipment $equipment = null) : PlayerNpc{
 		$this->requireOwner();
 		$entity = new PlayerEntity($location, $skin);
-		$npc = new PlayerNpc($this, $entity);
-		$entity->getHungerManager()->setEnabled(false);
-		$this->register($npc, $entity, $name);
-		return $npc;
+		return $this->spawn($entity, fn() => new PlayerNpc($this, $entity), $name, static function(PlayerNpc $npc) use ($entity, $equipment) : void{
+			$entity->getHungerManager()->setEnabled(false);
+			if($equipment !== null){ $npc->equip($equipment); }
+		});
 	}
 
-	public function createVillager(Location $location, string $name = '') : EntityNpc{
+	public function createVillager(Location $location, string $name = '') : VillagerNpc{
 		$this->requireOwner();
 		$entity = new VillagerEntity($location);
-		$npc = new EntityNpc($this, $entity);
-		$this->register($npc, $entity, $name);
-		return $npc;
+		return $this->spawn($entity, fn() => new VillagerNpc($this, $entity), $name);
 	}
 
-	private function register(Npc $npc, PlayerEntity|VillagerEntity $entity, string $name) : void{
+	public function createZombie(Location $location, string $name = '', ?Equipment $equipment = null) : ZombieNpc{
+		$this->requireOwner();
+		if($equipment !== null && ($equipment->mainHand !== null || $equipment->offHand !== null)){ throw new InvalidArgumentException('Zombie NPCs only support armor'); }
+		$entity = new ZombieEntity($location);
+		return $this->spawn($entity, fn() => new ZombieNpc($this, $entity), $name, $equipment === null ? null : static fn(ZombieNpc $npc) => $npc->equip($equipment));
+	}
+
+	/** @param class-string $class */
+	public function createMob(string $class, Location $location, string $name = '') : EntityNpc{
+		$this->requireOwner();
+		if(!is_subclass_of($class, Living::class) || !is_subclass_of($class, NpcEntity::class) || !is_subclass_of($class, NeverSavedWithChunkEntity::class) || is_subclass_of($class, Human::class) || !(new ReflectionClass($class))->isInstantiable()){
+			throw new InvalidArgumentException('Mob class must be a concrete non-human Living entity implementing ' . NpcEntity::class . ' and ' . NeverSavedWithChunkEntity::class);
+		}
+		$entity = new $class($location);
+		return $this->spawn($entity, fn() => new EntityNpc($this, $entity), $name);
+	}
+
+	/**
+	 * @template T of Npc
+	 * @param Closure(): T $wrap
+	 * @param null|Closure(T): void $prepare
+	 * @return T
+	 */
+	private function spawn(Living&NpcEntity $entity, Closure $wrap, string $name, ?Closure $prepare = null) : Npc{
+		try{ $npc = $wrap(); }
+		catch(Throwable $error){ $entity->requestClose(); throw $error; }
 		try{
-			$entity->setCanSaveWithChunk(false);
 			$entity->setStationary(true);
 			$entity->setNameTag($name);
 			$entity->setNameTagVisible(true);
 			$entity->setNameTagAlwaysVisible(true);
 			$this->npcs[$npc->getId()] = $npc;
+			$prepare?->__invoke($npc);
 			$entity->spawnToAll();
 			if($npc->isClosed() || $this->isClosed()){ throw new LogicException('NPC was closed during creation'); }
 		}catch(Throwable $error){
@@ -100,6 +98,7 @@ final class NpcManager{
 			$npc->release(true);
 			throw $error;
 		}
+		return $npc;
 	}
 
 	public function get(int $runtimeId) : ?Npc{ return $this->npcs[$runtimeId] ?? null; }
@@ -107,12 +106,20 @@ final class NpcManager{
 	public function getAll() : array{ return $this->npcs; }
 	public function count() : int{ return count($this->npcs); }
 	public function isClosed() : bool{ return $this->owner === null; }
+
 	public function remove(int $runtimeId) : bool{
 		$npc = $this->npcs[$runtimeId] ?? null;
 		if($npc === null){ return false; }
 		unset($this->npcs[$runtimeId]);
 		$npc->release(true);
 		return true;
+	}
+
+	/** @internal */
+	public function forget(int $runtimeId) : void{
+		$npc = $this->npcs[$runtimeId] ?? null;
+		unset($this->npcs[$runtimeId]);
+		$npc?->release(false);
 	}
 
 	public function close() : void{
@@ -124,14 +131,9 @@ final class NpcManager{
 				catch(Throwable $error){ $failure ??= $error; }
 			}
 		}finally{
-			foreach($this->listeners as $listener){ HandlerListManager::global()->unregisterAll($listener); }
-			$this->listeners = [];
+			$this->router?->unregister();
+			$this->router = null;
 		}
 		if($failure !== null){ throw $failure; }
-	}
-
-	private function failedCallback(Plugin $owner, Npc $npc, Throwable $error) : void{
-		$owner->getLogger()->logException($error);
-		$npc->close();
 	}
 }

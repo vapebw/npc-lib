@@ -2,8 +2,9 @@
 
 declare(strict_types=1);
 
-namespace NpcLib\Internal;
+namespace NpcLib\internal\entity;
 
+use Closure;
 use LogicException;
 use pocketmine\math\Vector3;
 use pocketmine\nbt\tag\CompoundTag;
@@ -30,11 +31,20 @@ trait EntityLifecycle{
 		}
 	}
 
+	public function guarded(Closure $operation) : mixed{
+		++$this->nativeDepth;
+		try{ return $operation(); }finally{ $this->finishOperation(); }
+	}
+
+	// npcs never drop equipment or xp on death
+	public function getDrops() : array{ return []; }
+	public function getXpDropAmount() : int{ return 0; }
+
 	private function wake() : void{
 		if(!$this->isClosed()){ $this->scheduleUpdate(); }
 	}
 
-	protected function initEntity(CompoundTag $nbt) : void{
+	public function initEntity(CompoundTag $nbt) : void{
 		parent::initEntity($nbt);
 		// sleeping entities never tick effects or sync metadata
 		$this->getEffects()->getEffectAddHooks()->add(function() : void{ $this->wake(); });
@@ -121,7 +131,8 @@ trait EntityLifecycle{
 		try{
 			$previousUpdate = $this->lastUpdate;
 			$updated = parent::onUpdate($currentTick);
-			// dead entities bypass the base tick that clears this flag; a same-tick call exits before the spawn event
+			// dead entities skip the base tick that clears justCreated
+			// a same-tick call exits before the spawn event
 			if($this->justCreated && !$this->isAlive() && $this->lastUpdate !== $previousUpdate){ $this->justCreated = false; }
 			return $updated || $this->attackTime > 0 || $this->noDamageTicks > 0;
 		}finally{ $this->finishOperation(); }
