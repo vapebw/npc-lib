@@ -6,6 +6,7 @@ namespace NpcLib\Internal;
 
 use LogicException;
 use pocketmine\math\Vector3;
+use pocketmine\nbt\tag\CompoundTag;
 use quark\event\entity\EntityDamageEvent;
 use quark\player\Player;
 
@@ -28,6 +29,31 @@ trait EntityLifecycle{
 			$this->close();
 		}
 	}
+
+	private function wake() : void{
+		if(!$this->isClosed()){ $this->scheduleUpdate(); }
+	}
+
+	protected function initEntity(CompoundTag $nbt) : void{
+		parent::initEntity($nbt);
+		// sleeping entities never tick effects or sync metadata
+		$this->getEffects()->getEffectAddHooks()->add(function() : void{ $this->wake(); });
+		$this->getEffects()->getEffectRemoveHooks()->add(function() : void{ $this->wake(); });
+	}
+
+	public function setFireTicks(int $fireTicks) : void{
+		parent::setFireTicks($fireTicks);
+		if($fireTicks > 0){ $this->wake(); }
+	}
+
+	public function setNameTag(string $name) : void{ parent::setNameTag($name); $this->wake(); }
+	public function setNameTagVisible(bool $value = true) : void{ parent::setNameTagVisible($value); $this->wake(); }
+	public function setNameTagAlwaysVisible(bool $value = true) : void{ parent::setNameTagAlwaysVisible($value); $this->wake(); }
+	public function setScoreTag(string $score) : void{ parent::setScoreTag($score); $this->wake(); }
+	public function setScale(float $value) : void{ parent::setScale($value); $this->wake(); }
+	public function setInvisible(bool $value = true) : void{ parent::setInvisible($value); $this->wake(); }
+	public function setSilent(bool $value = true) : void{ parent::setSilent($value); $this->wake(); }
+	public function setSneaking(bool $value = true) : void{ parent::setSneaking($value); $this->wake(); }
 
 	public function setStationary(bool $value) : void{
 		$this->stationary = $value;

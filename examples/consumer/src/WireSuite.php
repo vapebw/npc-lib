@@ -225,7 +225,7 @@ final class WireSuite{
 			$entity = ($this->entities[$id] ?? null)?->get();
 			$closed = $handle->isClosed();
 			$location = $entity?->getLocation();
-			$rows[] = ['id' => $id, 'name' => $this->names[$id] ?? null, 'health' => $entity instanceof Living ? $entity->getHealth() : null, 'closed' => $closed, 'position' => $location === null ? null : ['x' => $location->x, 'y' => $location->y, 'z' => $location->z], 'viewers' => $closed ? [] : array_values(array_map(static fn(Player $player) : string => $player->getName(), $entity?->getViewers() ?? [])), 'weakReleased' => $entity === null];
+			$rows[] = ['id' => $id, 'name' => $this->names[$id] ?? null, 'health' => $entity instanceof Living ? $entity->getHealth() : null, 'closed' => $closed, 'position' => $location === null ? null : ['x' => $location->x, 'y' => $location->y, 'z' => $location->z], 'viewers' => $closed ? [] : array_values(array_map(static fn(Player $player) : string => $player->getName(), $entity?->getViewers() ?? [])), 'weakReleased' => $entity === null, 'queued' => $entity !== null && !$closed && isset($entity->getWorld()->updateEntities[$id])];
 		}
 		$probe = $this->spawnProbe;
 		if($probe !== []){

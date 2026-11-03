@@ -27,4 +27,25 @@ $file = (new ReflectionClass(\NpcLib\Package::class))->getFileName();
 if($file === false || !str_starts_with($file, 'phar://') || !str_contains($file, '/vendor/vapebw/npc-lib/')){
 	throw new RuntimeException('Library was resolved outside the PHAR');
 }
+$sourceRoot = dirname(__DIR__) . '/src';
+$packaged = 0;
+foreach(new RecursiveIteratorIterator(new RecursiveDirectoryIterator($sourceRoot, FilesystemIterator::SKIP_DOTS)) as $source){
+	if(!$source instanceof SplFileInfo || !$source->isFile()){
+		continue;
+	}
+	$relative = str_replace('\\', '/', substr($source->getPathname(), strlen($sourceRoot) + 1));
+	$entry = 'vendor/vapebw/npc-lib/src/' . $relative;
+	if(!isset($phar[$entry]) || hash('sha256', $phar[$entry]->getContent()) !== hash_file('sha256', $source->getPathname())){
+		throw new RuntimeException('PHAR copy differs from final source ' . $relative);
+	}
+	++$packaged;
+}
+foreach(new RecursiveIteratorIterator(new RecursiveDirectoryIterator('phar://' . $path . '/vendor/vapebw/npc-lib/src', FilesystemIterator::SKIP_DOTS)) as $entry){
+	if($entry instanceof SplFileInfo && $entry->isFile()){
+		--$packaged;
+	}
+}
+if($packaged !== 0){
+	throw new RuntimeException('PHAR contains files not present in final source');
+}
 echo 'PHAR Composer autoload PASS ' . $file . PHP_EOL;

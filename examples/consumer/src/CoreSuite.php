@@ -14,6 +14,8 @@ use quark\entity\Living;
 use quark\entity\Location;
 use quark\entity\Skin;
 use quark\entity\Villager;
+use quark\entity\effect\EffectInstance;
+use quark\entity\effect\VanillaEffects;
 use quark\event\entity\EntityDamageByEntityEvent;
 use quark\event\entity\EntityDamageEvent;
 use quark\event\entity\EntityDeathEvent;
@@ -202,12 +204,84 @@ final class CoreSuite{
 					$chunkNpc = $this->manager->createVillager(new Location($cx * 16 + 0.5, 16, $cz * 16 + 0.5, $this->world, 0, 0));
 					$this->check($this->world->unloadChunk($cx, $cz, false) && $chunkNpc->isClosed() && $this->manager->get($chunkNpc->getId()) === null, 'native chunk unload cleans owned NPC');
 					$this->check($this->world->loadChunk($cx, $cz) !== null && $this->world->getChunkEntities($cx, $cz) === [], 'saved chunk does not restore NPC');
-					$this->stage($this->deathAndLoad(...), 25);
+					$this->stage($this->dormantSetup(...), 25);
 				}, 1);
 			},
 			function() : void{ $this->stage(static function() : void{ throw new RuntimeException('Native chunk population failed'); }, 1); }
 		);
 
+	}
+
+	/** @var array<string, Npc> */
+	private array $dormant = [];
+
+	private function dormantSetup() : void{
+		foreach(['fire', 'effect', 'meta', 'teleport'] as $i => $name){
+			$this->dormant[$name] = $this->manager->createVillager($this->location(20.5 + $i), 'Dormant' . $name);
+		}
+		$spawn = $this->world->getSpawnLocation();
+		$this->nativeControl = new Villager(new Location($spawn->x, $spawn->y, $spawn->z, $this->world, 0, 0));
+		$this->nativeControl->setCanSaveWithChunk(false);
+		$this->stage($this->dormantApply(...), 10);
+	}
+
+	private function dormantApply() : void{
+		$asleep = true;
+		foreach($this->dormant as $npc){ $asleep = $asleep && !isset($this->world->updateEntities[$npc->getId()]); }
+		$this->check($asleep, 'dormant probes sleep before external changes');
+		$fire = $this->world->getEntity($this->dormant['fire']->getId());
+		$effect = $this->world->getEntity($this->dormant['effect']->getId());
+		$meta = $this->world->getEntity($this->dormant['meta']->getId());
+		if(!$fire instanceof Living || !$effect instanceof Living || !$meta instanceof Living){ throw new RuntimeException('Missing dormant entity'); }
+		$fire->setOnFire(3);
+		$effect->getEffects()->add(new EffectInstance(VanillaEffects::SPEED(), 30));
+		$meta->setScale(2.0);
+		$this->dormantFireBefore = $fire->getFireTicks();
+		$this->nativeAsleep = $this->nativeControl !== null && !isset($this->world->updateEntities[$this->nativeControl->getId()]);
+		$this->nativeControl?->setOnFire(3);
+		$this->nativeControl?->getEffects()->add(new EffectInstance(VanillaEffects::SPEED(), 30));
+		$this->stage($this->dormantObserve(...), 10);
+	}
+
+	private int $dormantFireBefore = 0;
+	private ?Villager $nativeControl = null;
+	private bool $nativeAsleep = false;
+
+	private function dormantObserve() : void{
+		$fire = $this->world->getEntity($this->dormant['fire']->getId());
+		$effect = $this->world->getEntity($this->dormant['effect']->getId());
+		$meta = $this->world->getEntity($this->dormant['meta']->getId());
+		if(!$fire instanceof Living || !$effect instanceof Living || !$meta instanceof Living){ throw new RuntimeException('Missing dormant entity'); }
+		$dirty = new \ReflectionProperty(\quark\entity\Entity::class, 'networkPropertiesDirty');
+		$results = [
+			'external fire ticks down' => $fire->getFireTicks() < $this->dormantFireBefore,
+			'external effect ticks down' => ($effect->getEffects()->get(VanillaEffects::SPEED())?->getDuration() ?? 0) < 30,
+			'external metadata synced' => $dirty->getValue($meta) === false,
+		];
+		$this->plugin->getLogger()->info('DORMANT ' . json_encode($results, JSON_THROW_ON_ERROR));
+		$this->plugin->getLogger()->info('NATIVE-CONTROL ' . json_encode(['fire' => $this->nativeControl?->getFireTicks(), 'speed' => $this->nativeControl?->getEffects()->get(VanillaEffects::SPEED())?->getDuration(), 'asleep_before' => $this->nativeAsleep, 'queued' => $this->nativeControl !== null && isset($this->world->updateEntities[$this->nativeControl->getId()])], JSON_THROW_ON_ERROR));
+		foreach($results as $name => $ok){ $this->check($ok, 'dormant ' . $name); }
+		$this->stage($this->dormantExpire(...), 70);
+	}
+
+	private function dormantExpire() : void{
+		$fire = $this->world->getEntity($this->dormant['fire']->getId());
+		$effect = $this->world->getEntity($this->dormant['effect']->getId());
+		if(!$fire instanceof Living || !$effect instanceof Living){ throw new RuntimeException('Missing dormant entity'); }
+		$this->check(!$fire->isOnFire() && !$effect->getEffects()->has(VanillaEffects::SPEED()), 'dormant fire and effect expire');
+		$asleep = true;
+		foreach($this->dormant as $npc){ $asleep = $asleep && !isset($this->world->updateEntities[$npc->getId()]); }
+		$this->check($asleep, 'dormant probes sleep again');
+		$teleport = $this->world->getEntity($this->dormant['teleport']->getId());
+		if(!$teleport instanceof Living){ throw new RuntimeException('Missing teleport entity'); }
+		$target = new Location(30.5, 16, 1.5, $this->world, 90, 0);
+		$teleport->teleport($target);
+		$this->check(isset($this->world->updateEntities[$teleport->getId()]), 'external teleport wakes entity');
+		foreach($this->dormant as $npc){ $npc->close(); }
+		$this->dormant = [];
+		$this->nativeControl?->close();
+		$this->nativeControl = null;
+		$this->stage($this->deathAndLoad(...), 5);
 	}
 
 	private function deathAndLoad() : void{
