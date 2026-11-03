@@ -1,0 +1,114 @@
+{
+    "_readme": [
+        "This file locks the dependencies of your project to a known state",
+        "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
+        "This file is @generated automatically"
+    ],
+    "content-hash": "e6fb1b61e3dd11462479a7b3b169128b",
+    "packages": [
+        {
+            "name": "vapebw/npc-lib",
+            "version": "0.0.0-p0",
+            "dist": {
+                "type": "path",
+                "url": "../../work/package",
+                "reference": "ad2b74c8bd938170f4b16f23b213d8408e720a9f"
+            },
+            "require": {
+                "php": "~8.4.0 || ~8.5.0",
+                "php-64bit": "*"
+            },
+            "require-dev": {
+                "phpstan/phpstan": "^2.1",
+                "phpstan/phpstan-strict-rules": "^2.0",
+                "phpunit/phpunit": "^12.5"
+            },
+            "type": "library",
+            "extra": {
+                "quark-api": "6.0.0",
+                "quark-source": {
+                    "repository": "https://github.com/Bedrock-Phanatics/Quark",
+                    "ref": "0f91b13d470026cf6aefb5df649d32db9b0e342d"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "NpcLib\\": "src/"
+                }
+            },
+            "autoload-dev": {
+                "psr-4": {
+                    "NpcLibTests\\": "tests/"
+                }
+            },
+            "archive": {
+                "exclude": [
+                    "/work",
+                    "/vendor",
+                    "/tests",
+                    "/tools",
+                    "/examples",
+                    "/docs",
+                    "/composer.lock",
+                    "/phpstan*.neon",
+                    "/phpunit.xml",
+                    "/.github",
+                    "/.phpunit.cache"
+                ]
+            },
+            "scripts": {
+                "lint": [
+                    "@php tools/lint.php"
+                ],
+                "test": [
+                    "@php vendor/phpunit/phpunit/phpunit"
+                ],
+                "analyse": [
+                    "@php vendor/phpstan/phpstan/phpstan analyse --no-progress"
+                ],
+                "check": [
+                    "@composer validate --strict",
+                    "@composer check-platform-reqs",
+                    "@lint",
+                    "@test",
+                    "@analyse"
+                ],
+                "build:consumer": [
+                    "@php -d phar.readonly=0 tools/build-consumer.php"
+                ],
+                "test:phar": [
+                    "@php tools/check-phar.php"
+                ],
+                "analyse:consumer": [
+                    "@php vendor/phpstan/phpstan/phpstan analyse -c phpstan-consumer.neon --no-progress"
+                ],
+                "stage:package": [
+                    "@composer archive --format=tar --dir=work/dist --file=npc-lib",
+                    "@php tools/stage-package.php"
+                ]
+            },
+            "license": [
+                "proprietary"
+            ],
+            "description": "Private NPC library foundation for Quark API 6.0.0",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        }
+    ],
+    "packages-dev": [],
+    "aliases": [],
+    "minimum-stability": "stable",
+    "stability-flags": {},
+    "prefer-stable": false,
+    "prefer-lowest": false,
+    "platform": {
+        "php": "~8.4.0 || ~8.5.0"
+    },
+    "platform-dev": {},
+    "platform-overrides": {
+        "php": "8.4.0"
+    },
+    "plugin-api-version": "2.9.0"
+}

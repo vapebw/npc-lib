@@ -1,0 +1,12 @@
+name = "NpcLibP0Consumer"
+main = "NpcLibP0Consumer\\Main"
+version = "0.0.0"
+api = ["6.0.0"]
+src-namespace-prefix = "NpcLibP0Consumer"
+
+[commands.npctest]
+description = "Local NPC integration fixture"
+permission = "npclib.test"
+
+[permissions."npclib.test"]
+default = true

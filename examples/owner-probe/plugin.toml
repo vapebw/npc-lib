@@ -1,0 +1,6 @@
+name = "NpcLibOwnerProbe"
+main = "NpcLibOwnerProbe\\Main"
+version = "0.0.0"
+api = ["6.0.0"]
+src-namespace-prefix = "NpcLibOwnerProbe"
+depend = ["NpcLibP0Consumer"]

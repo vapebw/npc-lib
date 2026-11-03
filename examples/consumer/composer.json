@@ -1,0 +1,29 @@
+{
+  "name": "vapebw/npc-lib-consumer",
+  "description": "Local P0 integration consumer",
+  "type": "quark-plugin",
+  "license": "proprietary",
+  "repositories": [
+    {
+      "type": "path",
+      "url": "../../work/package",
+      "options": {
+        "symlink": false,
+        "versions": {
+          "vapebw/npc-lib": "0.0.0-p0"
+        }
+      }
+    }
+  ],
+  "require": {
+    "php": "~8.4.0 || ~8.5.0",
+    "vapebw/npc-lib": "0.0.0-p0"
+  },
+  "config": {
+    "allow-plugins": {},
+    "sort-packages": true,
+    "platform": {
+      "php": "8.4.0"
+    }
+  }
+}
