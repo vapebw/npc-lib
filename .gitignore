@@ -1,0 +1,6 @@
+/vendor/
+/work/
+/examples/consumer/vendor/
+/.phpunit.cache/
+
+/tests/bedrock-client/node_modules/

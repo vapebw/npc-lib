@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="vendor/autoload.php" cacheDirectory=".phpunit.cache" failOnWarning="true" failOnRisky="true" failOnDeprecation="true">
+  <testsuites><testsuite name="P0"><directory>tests</directory></testsuite></testsuites>
+</phpunit>

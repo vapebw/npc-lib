@@ -1,0 +1,14 @@
+includes:
+	- vendor/phpstan/phpstan-strict-rules/rules.neon
+parameters:
+	level: max
+	phpVersion: 80400
+	paths:
+		- src
+		- tests
+		- tools
+	tmpDir: work/phpstan
+	scanDirectories:
+		- work/quark/src
+		- work/quark/generated
+		- work/quark/vendor
