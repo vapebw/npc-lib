@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $quark = Join-Path $root 'work/quark'
 $runtime = Join-Path $root 'work/quark-runtime'
-$evidence = Join-Path $root 'work/integration-setup'
+$evidence = Join-Path $root 'work/logs'
 $expected = '0f91b13d470026cf6aefb5df649d32db9b0e342d'
 $archiveHash = '0b09107d778db4de17e95e8c96dcd525d0a67b9c9d1fe7dbad2e3dbddb67d757'
 if ((Get-FileHash -LiteralPath $RuntimeArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $archiveHash) {

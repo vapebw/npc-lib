@@ -2,16 +2,20 @@
 
 declare(strict_types=1);
 
-namespace NpcLibP0Consumer;
+namespace NpcLibHarness;
 
 use LogicException;
-use NpcLib\Npc;
+use NpcLib\equipment\Equipment;
+use NpcLib\npc\Npc;
 use NpcLib\NpcManager;
-use NpcLib\PlayerNpc;
+use NpcLib\npc\PlayerNpc;
+use NpcLib\npc\ZombieNpc;
 use quark\entity\Entity;
 use quark\entity\Living;
 use quark\entity\Location;
 use quark\entity\Skin;
+use quark\item\VanillaItems;
+use pocketmine\math\Vector3;
 use quark\event\entity\EntityDamageByEntityEvent;
 use quark\event\entity\EntityDamageEvent;
 use quark\event\entity\EntityDeathEvent;
@@ -26,7 +30,7 @@ use RuntimeException;
 use Throwable;
 use WeakReference;
 
-final class WireSuite{
+final class WireFixture{
 	private NpcManager $manager;
 	/** @var array<int, Npc> */
 	private array $handles = [];
@@ -81,6 +85,8 @@ final class WireSuite{
 			switch($args[0] ?? 'state'){
 				case 'create': $this->create($args[1] ?? 'NpcProbeA'); break;
 				case 'spawn-close': $this->spawnClose(); break;
+				case 'kit-create': $this->createKit($args[1] ?? 'NpcProbeA'); break;
+				case 'kit': $this->kit($args[1] ?? ''); break;
 				case 'skin':
 					foreach($this->manager->getAll() as $npc){
 						if($npc instanceof PlayerNpc){ $npc->setSkin(new Skin('wire-npc-updated', str_repeat("\x40\x80\xc0\xff", 64 * 64))); }
@@ -121,9 +127,64 @@ final class WireSuite{
 			}
 		}catch(Throwable $error){
 			$this->error = $error::class . ': ' . $error->getMessage();
-			$this->plugin->getLogger()->error('WireSuite ' . $this->error);
+			$this->plugin->getLogger()->error('WireFixture ' . $this->error);
 		}
 		$this->write();
+	}
+
+	private function createKit(string $name) : void{
+		foreach($this->manager->getAll() as $npc){ $npc->close(); }
+		$player = $this->player($name);
+		$location = $player->getLocation();
+		$this->home = new Location($location->x, $location->y, $location->z, $location->getWorld(), 0, 0);
+		$other = $this->plugin->getServer()->getPlayerExact('NpcProbeB');
+		$other?->teleport($this->home);
+		$skin = new Skin('wire-npc', str_repeat("\xff", 64 * 64 * 4));
+		$world = $location->getWorld();
+		$this->watch($this->manager->createPlayer(new Location($location->x + 2, $location->y, $location->z, $world, 0, 0), $skin, 'KitPlayer', new Equipment(mainHand: VanillaItems::DIAMOND_SWORD(), offHand: VanillaItems::IRON_SWORD(), helmet: VanillaItems::IRON_HELMET(), chestplate: VanillaItems::DIAMOND_CHESTPLATE(), boots: VanillaItems::LEATHER_BOOTS())));
+		$this->watch($this->manager->createZombie(new Location($location->x - 2, $location->y, $location->z, $world, 0, 0), 'KitZombie', new Equipment(helmet: VanillaItems::IRON_HELMET(), leggings: VanillaItems::DIAMOND_LEGGINGS())));
+		$this->watch($this->manager->createVillager(new Location($location->x, $location->y, $location->z + 3, $world, 0, 0), 'KitVillager'));
+	}
+
+	private function kit(string $step) : void{
+		$player = null;
+		$zombie = null;
+		$villager = null;
+		foreach($this->manager->getAll() as $npc){
+			if($npc instanceof PlayerNpc){ $player = $npc; }
+			elseif($npc instanceof ZombieNpc){ $zombie = $npc; }
+			else{ $villager = $npc; }
+		}
+		if($player === null || $zombie === null || $villager === null){ throw new RuntimeException('Create kit NPCs first'); }
+		switch($step){
+			case 'equip':
+				$player->setHelmet(VanillaItems::DIAMOND_HELMET());
+				$player->setMainHand(VanillaItems::IRON_SWORD());
+				$player->setOffHand(null);
+				$zombie->setChestplate(VanillaItems::DIAMOND_CHESTPLATE());
+				break;
+			case 'appearance':
+				foreach([$player, $zombie, $villager] as $npc){ $npc->setScale(2.0); $npc->setScoreTag('score-' . $npc->getId()); }
+				$player->setSneaking(true);
+				$zombie->setInvisible(true);
+				break;
+			case 'rotate':
+				$player->setRotation(90.0, 30.0);
+				$home = $this->home ?? throw new RuntimeException('Create NPCs first');
+				$zombie->lookAt(new Vector3($home->x + 10, $home->y + 1.62, $home->z));
+				$villager->setRotation(180.0, -20.0);
+				break;
+			case 'swing':
+				$player->swingArm();
+				$zombie->swingArm();
+				break;
+			case 'reset':
+				foreach([$player, $zombie, $villager] as $npc){ $npc->setScale(1.0); $npc->setRotation(0.0, 0.0); }
+				$player->setSneaking(false);
+				$zombie->setInvisible(false);
+				break;
+			default: throw new RuntimeException('Unknown kit step');
+		}
 	}
 
 	private function toggle(string $value) : bool{

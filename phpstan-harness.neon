@@ -2,4 +2,5 @@ includes:
 	- phpstan.neon
 parameters:
 	paths:
-		- examples/consumer/src
+		- tests/harness/src
+		- tests/peer/src

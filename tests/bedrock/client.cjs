@@ -5,7 +5,7 @@ const crypto = require('node:crypto')
 const bedrock = require('bedrock-protocol')
 const VERSION = '1.26.51'
 const players = new Map()
-const outputDir = path.resolve(__dirname, '../../work/bedrock-client')
+const outputDir = path.resolve(__dirname, '../../work/wire/client')
 fs.mkdirSync(outputDir, { recursive: true })
 const logfile = path.join(outputDir, 'wire-events.jsonl')
 function log(event, data = {}) {
@@ -47,7 +47,7 @@ function connect(name) {
     state.entities.set(String(id), packet)
     log(type, { player: name, packet })
   })
-  for (const type of ['remove_entity', 'player_list', 'player_skin', 'text', 'command_output', 'set_entity_data', 'update_attributes']) client.on(type, packet => log(type, { player: name, packet }))
+  for (const type of ['remove_entity', 'player_list', 'player_skin', 'text', 'command_output', 'set_entity_data', 'update_attributes', 'mob_equipment', 'mob_armor_equipment', 'entity_event', 'move_entity', 'move_entity_delta']) client.on(type, packet => log(type, { player: name, packet }))
   return state
 }
 function action(input) {

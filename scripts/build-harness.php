@@ -3,16 +3,16 @@
 declare(strict_types=1);
 
 $root = dirname(__DIR__);
-$source = $root . '/examples/consumer';
+$source = $root . '/tests/harness';
 if(!is_file($source . '/vendor/autoload.php')){
-	throw new RuntimeException('Run composer install --no-dev in examples/consumer first');
+	throw new RuntimeException('Run composer install --no-dev in tests/harness first');
 }
 if(!is_dir($root . '/work/artifacts') && !mkdir($root . '/work/artifacts', 0777, true)){
 	throw new RuntimeException('Cannot create artifact directory');
 }
-$output = $root . '/work/artifacts/NpcLibP0Consumer.phar';
+$output = $root . '/work/artifacts/NpcLibHarness.phar';
 if(is_file($output) && !unlink($output)){
-	throw new RuntimeException('Cannot replace consumer PHAR');
+	throw new RuntimeException('Cannot replace harness PHAR');
 }
 $phar = new Phar($output);
 $phar->startBuffering();
@@ -37,10 +37,10 @@ $phar->setSignatureAlgorithm(Phar::SHA256);
 $phar->stopBuffering();
 echo $output . PHP_EOL;
 
-$probe = $root . '/work/artifacts/NpcLibOwnerProbe.phar';
-if(is_file($probe) && !unlink($probe)){ throw new RuntimeException('Cannot replace owner probe'); }
-$owner = new Phar($probe);
-$owner->addFile($root . '/examples/owner-probe/plugin.toml', 'plugin.toml');
-$owner->addFile($root . '/examples/owner-probe/src/Main.php', 'src/Main.php');
-$owner->setStub('<?php __HALT_COMPILER();');
-$owner->setSignatureAlgorithm(Phar::SHA256);
+$peerPath = $root . '/work/artifacts/NpcLibPeer.phar';
+if(is_file($peerPath) && !unlink($peerPath)){ throw new RuntimeException('Cannot replace peer plugin'); }
+$peer = new Phar($peerPath);
+$peer->addFile($root . '/tests/peer/plugin.toml', 'plugin.toml');
+$peer->addFile($root . '/tests/peer/src/Main.php', 'src/Main.php');
+$peer->setStub('<?php __HALT_COMPILER();');
+$peer->setSignatureAlgorithm(Phar::SHA256);

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-$path = dirname(__DIR__) . '/work/artifacts/NpcLibP0Consumer.phar';
+$path = dirname(__DIR__) . '/work/artifacts/NpcLibHarness.phar';
 $phar = new Phar($path);
 foreach(['plugin.toml', 'src/Main.php', 'vendor/autoload.php', 'vendor/vapebw/npc-lib/src/Package.php'] as $name){
 	if(!isset($phar[$name])){
@@ -15,7 +15,7 @@ foreach(new RecursiveIteratorIterator($phar) as $entry){
 	}
 	$name = str_replace('\\', '/', $entry->getPathname());
 	$relative = substr($name, strlen('phar://' . str_replace('\\', '/', $path)) + 1);
-	if(str_contains($relative, '/work/') || str_contains($relative, '/tests/') || str_contains($relative, '/phpunit/') || str_contains($relative, '/phpstan/')){
+	if(preg_match('#(^|/)(work|tests|phpunit|phpstan)/#', $relative) === 1){
 		throw new RuntimeException('Development files leaked into PHAR');
 	}
 }

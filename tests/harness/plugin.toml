@@ -1,8 +1,8 @@
-name = "NpcLibP0Consumer"
-main = "NpcLibP0Consumer\\Main"
+name = "NpcLibHarness"
+main = "NpcLibHarness\\Main"
 version = "0.0.0"
 api = ["6.0.0"]
-src-namespace-prefix = "NpcLibP0Consumer"
+src-namespace-prefix = "NpcLibHarness"
 
 [commands.npctest]
 description = "Local NPC integration fixture"

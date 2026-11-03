@@ -14,11 +14,11 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--php", type=Path, default=root / "work/quark-runtime/bin/php/php.exe")
 parser.add_argument("--name", required=True)
 parser.add_argument("--suite", action="store_true")
-parser.add_argument("--artifact", type=Path, default=root / "work/artifacts/NpcLibP0Consumer.phar")
+parser.add_argument("--artifact", type=Path, default=root / "work/artifacts/NpcLibHarness.phar")
 args = parser.parse_args()
 if not re.fullmatch(r"[a-zA-Z0-9_-]+", args.name):
     parser.error("name must be a simple directory identifier")
-run = root / "work/integration-runs" / args.name
+run = root / "work/runs" / args.name
 run.mkdir(parents=True, exist_ok=True)
 data = run / "server"
 plugins = data / "plugins"
@@ -31,6 +31,7 @@ env["PHP_INI_SCAN_DIR"] = ""
 env["OPENSSL_CONF"] = str(php.parent / "extras/ssl/openssl.cnf")
 env["OPENSSL_MODULES"] = str(php.parent / "extras/ssl")
 env.pop("COMPOSER", None)
+env.pop("NPCLIB_WIRE", None)
 if args.suite:
     env["NPCLIB_SUITE"] = "1"
 quark = root / "work/quark"
@@ -51,10 +52,11 @@ init_code = 'require $argv[1]; (new \\quark\\FilesystemMigration(new \\quark\\Fi
 init = php_args + ["-r", init_code, str(quark / "vendor/autoload.php"), str(data), str(plugins)]
 with (run / "initialize.log").open("wb") as log:
     subprocess.run(init, cwd=root, env=env, check=True, stdout=log, stderr=subprocess.STDOUT)
-shutil.copy2(args.artifact, plugins / "NpcLibP0Consumer.phar")
+shutil.copy2(args.artifact, plugins / "NpcLibHarness.phar")
 if args.suite:
-    shutil.copy2(root / "work/artifacts/NpcLibOwnerProbe.phar", plugins / "NpcLibOwnerProbe.phar")
-    (data / "data/plugins/NpcLibP0Consumer/p1p2-result.json").unlink(missing_ok=True)
+    shutil.copy2(args.artifact.parent / "NpcLibPeer.phar", plugins / "NpcLibPeer.phar")
+    for stale in ("lifecycle-result.json", "feature-result.json"):
+        (data / "data/plugins/NpcLibHarness" / stale).unlink(missing_ok=True)
 config = (quark / "resources/server.toml").read_text(encoding="utf8").replace("\n[server]\n", "\n[server]\nserver-ip = '127.0.0.1'\n")
 for before, after in {
     "transport.nethernet.lan-discovery = true": "transport.nethernet.lan-discovery = false",
@@ -86,7 +88,7 @@ def read_output():
             print(line, end="", flush=True)
             if "Done (" in line:
                 ready.set()
-            if "P1P2 CORE READY" in line:
+            if "feature suite done" in line or "lifecycle suite FAIL" in line:
                 suite_done.set()
 
 reader = threading.Thread(target=read_output)
@@ -98,7 +100,7 @@ if process.poll() is None and ready.is_set():
     process.stdin.write(b"version\nstatus\n")
     process.stdin.flush()
     if args.suite:
-        suite_done.wait(30)
+        suite_done.wait(90)
     else:
         time.sleep(2)
 if process.poll() is None:
@@ -115,9 +117,9 @@ reader.join()
 output = "".join(lines)
 checks = {
     "ready": ready.is_set(),
-    "enabled": "Enabling NpcLibP0Consumer" in output and "npc-lib P0 LOAD PASS" in output,
-    "internal_phar_autoload": "npc-lib P0 AUTOLOAD PASS api=6.0.0 source=phar://" in output,
-    "disabled": "Disabling NpcLibP0Consumer" in output and "npc-lib P0 DISABLE PASS" in output,
+    "enabled": "Enabling NpcLibHarness" in output and "harness LOAD PASS" in output,
+    "internal_phar_autoload": "harness AUTOLOAD PASS api=6.0.0 source=phar://" in output,
+    "disabled": "Disabling NpcLibHarness" in output and "harness DISABLE PASS" in output,
     "world_unloaded": 'Unloading world "world"' in output,
     "exit_zero": code == 0,
     "not_force_killed": not forced,
@@ -125,10 +127,14 @@ checks = {
     "no_crash_reports": not any((data / "diagnostics/crashes").glob("*")),
 }
 if args.suite:
-    suite_file = data / "data/plugins/NpcLibP0Consumer/p1p2-result.json"
+    suite_file = data / "data/plugins/NpcLibHarness/lifecycle-result.json"
     suite = json.loads(suite_file.read_text(encoding="utf8")) if suite_file.exists() else {"result": "MISSING"}
-    (run / "suite.json").write_text(json.dumps(suite, indent=2) + "\n", encoding="utf8")
-    checks["core_suite"] = suite["result"] == "PASS" and suite_done.is_set()
+    (run / "lifecycle.json").write_text(json.dumps(suite, indent=2) + "\n", encoding="utf8")
+    checks["lifecycle_suite"] = suite["result"] == "PASS" and suite_done.is_set()
+    feature_file = data / "data/plugins/NpcLibHarness/feature-result.json"
+    features = json.loads(feature_file.read_text(encoding="utf8")) if feature_file.exists() else {"result": "MISSING"}
+    (run / "features.json").write_text(json.dumps(features, indent=2) + "\n", encoding="utf8")
+    checks["feature_suite"] = features["result"] == "PASS"
 summary = {"quark": sha, "exit": code, "checks": checks, "result": "PASS" if all(checks.values()) else "FAIL"}
 (run / "result.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf8")
 print(json.dumps(summary, indent=2), flush=True)

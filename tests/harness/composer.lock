@@ -4,15 +4,15 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "e6fb1b61e3dd11462479a7b3b169128b",
+    "content-hash": "e816d0e7e2c05a2e995f5bad25d663ec",
     "packages": [
         {
             "name": "vapebw/npc-lib",
-            "version": "0.0.0-p0",
+            "version": "0.0.0-dev",
             "dist": {
                 "type": "path",
                 "url": "../../work/package",
-                "reference": "ad2b74c8bd938170f4b16f23b213d8408e720a9f"
+                "reference": "ae3b42b0040536adaeb6dbdd6b9fd0bc4ddd5357"
             },
             "require": {
                 "php": "~8.4.0 || ~8.5.0",
@@ -38,7 +38,8 @@
             },
             "autoload-dev": {
                 "psr-4": {
-                    "NpcLibTests\\": "tests/"
+                    "NpcLibTests\\Unit\\": "tests/unit/",
+                    "NpcLibTests\\Integration\\": "tests/integration/"
                 }
             },
             "archive": {
@@ -46,19 +47,20 @@
                     "/work",
                     "/vendor",
                     "/tests",
-                    "/tools",
-                    "/examples",
+                    "/scripts",
                     "/docs",
                     "/composer.lock",
                     "/phpstan*.neon",
                     "/phpunit.xml",
-                    "/.github",
+                    "/.editorconfig",
+                    "/.gitignore",
+                    "/.gitattributes",
                     "/.phpunit.cache"
                 ]
             },
             "scripts": {
                 "lint": [
-                    "@php tools/lint.php"
+                    "@php scripts/lint.php"
                 ],
                 "test": [
                     "@php vendor/phpunit/phpunit/phpunit"
@@ -73,24 +75,24 @@
                     "@test",
                     "@analyse"
                 ],
-                "build:consumer": [
-                    "@php -d phar.readonly=0 tools/build-consumer.php"
+                "build:harness": [
+                    "@php -d phar.readonly=0 scripts/build-harness.php"
                 ],
                 "test:phar": [
-                    "@php tools/check-phar.php"
+                    "@php scripts/check-phar.php"
                 ],
-                "analyse:consumer": [
-                    "@php vendor/phpstan/phpstan/phpstan analyse -c phpstan-consumer.neon --no-progress"
+                "analyse:harness": [
+                    "@php vendor/phpstan/phpstan/phpstan analyse -c phpstan-harness.neon --no-progress"
                 ],
                 "stage:package": [
                     "@composer archive --format=tar --dir=work/dist --file=npc-lib",
-                    "@php tools/stage-package.php"
+                    "@php scripts/stage-package.php"
                 ]
             },
             "license": [
                 "proprietary"
             ],
-            "description": "Private NPC library foundation for Quark API 6.0.0",
+            "description": "NPC library for Quark API 6.0.0",
             "transport-options": {
                 "symlink": false,
                 "relative": true
@@ -100,7 +102,9 @@
     "packages-dev": [],
     "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": {},
+    "stability-flags": {
+        "vapebw/npc-lib": 20
+    },
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": {

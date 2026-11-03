@@ -2,13 +2,13 @@
 
 declare(strict_types=1);
 
-namespace NpcLibP0Consumer;
+namespace NpcLibHarness;
 
 use Closure;
-use NpcLib\EntityNpc;
-use NpcLib\Npc;
+use NpcLib\npc\VillagerNpc;
+use NpcLib\npc\Npc;
 use NpcLib\NpcManager;
-use NpcLib\PlayerNpc;
+use NpcLib\npc\PlayerNpc;
 use quark\entity\Human;
 use quark\entity\Living;
 use quark\entity\Location;
@@ -29,11 +29,11 @@ use stdClass;
 use Throwable;
 use WeakReference;
 
-final class CoreSuite{
+final class LifecycleSuite{
 	private NpcManager $manager;
 	private PlayerNpc $player;
-	private EntityNpc $villager;
-	private EntityNpc $moving;
+	private VillagerNpc $villager;
+	private VillagerNpc $moving;
 	private PlayerNpc $corpse;
 	private int $corpseDeaths = 0;
 	private int $corpseSpawns = 0;
@@ -52,9 +52,12 @@ final class CoreSuite{
 	/** @var list<WeakReference<Living>> */
 	private array $released = [];
 	private int $sampleStart = 0;
+	/** @var array<string, Npc> */
+	private array $dormant = [];
+	private int $dormantFireBefore = 0;
 	private int $cpuStart = 0;
 
-	public function __construct(private PluginBase $plugin){
+	public function __construct(private PluginBase $plugin, private \Closure $next){
 		$world = $plugin->getServer()->getWorldManager()->getDefaultWorld();
 		if($world === null){ throw new RuntimeException('Missing world'); }
 		$this->world = $world;
@@ -74,8 +77,8 @@ final class CoreSuite{
 			try{ $callback(); }
 			catch(Throwable $error){
 				$this->error = $error::class . ': ' . $error->getMessage();
-				$this->plugin->getLogger()->error('P1P2 suite FAIL ' . $this->error);
-				$this->plugin->getLogger()->info('P1P2 CORE READY');
+				$this->plugin->getLogger()->error('lifecycle suite FAIL ' . $this->error);
+				$this->plugin->getLogger()->info('lifecycle suite done');
 			}
 		}), $delay);
 	}
@@ -97,7 +100,7 @@ final class CoreSuite{
 		$this->check($this->player->getSkin() === $this->skin, 'native skin update');
 		$this->villager->setProfession(Villager::PROFESSION_LIBRARIAN);
 		$this->check($this->villager->getProfession() === Villager::PROFESSION_LIBRARIAN, 'villager profession');
-		$probe = $this->plugin->getServer()->getPluginManager()->getPlugin('NpcLibOwnerProbe');
+		$probe = $this->plugin->getServer()->getPluginManager()->getPlugin('NpcLibPeer');
 		$this->check($probe !== null && $probe->isEnabled(), 'second plugin loaded');
 		if($probe === null){ throw new RuntimeException('Missing ownership probe'); }
 		$other = new NpcManager($probe);
@@ -212,16 +215,10 @@ final class CoreSuite{
 
 	}
 
-	/** @var array<string, Npc> */
-	private array $dormant = [];
-
 	private function dormantSetup() : void{
 		foreach(['fire', 'effect', 'meta', 'teleport'] as $i => $name){
 			$this->dormant[$name] = $this->manager->createVillager($this->location(20.5 + $i), 'Dormant' . $name);
 		}
-		$spawn = $this->world->getSpawnLocation();
-		$this->nativeControl = new Villager(new Location($spawn->x, $spawn->y, $spawn->z, $this->world, 0, 0));
-		$this->nativeControl->setCanSaveWithChunk(false);
 		$this->stage($this->dormantApply(...), 10);
 	}
 
@@ -237,15 +234,8 @@ final class CoreSuite{
 		$effect->getEffects()->add(new EffectInstance(VanillaEffects::SPEED(), 30));
 		$meta->setScale(2.0);
 		$this->dormantFireBefore = $fire->getFireTicks();
-		$this->nativeAsleep = $this->nativeControl !== null && !isset($this->world->updateEntities[$this->nativeControl->getId()]);
-		$this->nativeControl?->setOnFire(3);
-		$this->nativeControl?->getEffects()->add(new EffectInstance(VanillaEffects::SPEED(), 30));
 		$this->stage($this->dormantObserve(...), 10);
 	}
-
-	private int $dormantFireBefore = 0;
-	private ?Villager $nativeControl = null;
-	private bool $nativeAsleep = false;
 
 	private function dormantObserve() : void{
 		$fire = $this->world->getEntity($this->dormant['fire']->getId());
@@ -258,8 +248,6 @@ final class CoreSuite{
 			'external effect ticks down' => ($effect->getEffects()->get(VanillaEffects::SPEED())?->getDuration() ?? 0) < 30,
 			'external metadata synced' => $dirty->getValue($meta) === false,
 		];
-		$this->plugin->getLogger()->info('DORMANT ' . json_encode($results, JSON_THROW_ON_ERROR));
-		$this->plugin->getLogger()->info('NATIVE-CONTROL ' . json_encode(['fire' => $this->nativeControl?->getFireTicks(), 'speed' => $this->nativeControl?->getEffects()->get(VanillaEffects::SPEED())?->getDuration(), 'asleep_before' => $this->nativeAsleep, 'queued' => $this->nativeControl !== null && isset($this->world->updateEntities[$this->nativeControl->getId()])], JSON_THROW_ON_ERROR));
 		foreach($results as $name => $ok){ $this->check($ok, 'dormant ' . $name); }
 		$this->stage($this->dormantExpire(...), 70);
 	}
@@ -279,8 +267,6 @@ final class CoreSuite{
 		$this->check(isset($this->world->updateEntities[$teleport->getId()]), 'external teleport wakes entity');
 		foreach($this->dormant as $npc){ $npc->close(); }
 		$this->dormant = [];
-		$this->nativeControl?->close();
-		$this->nativeControl = null;
 		$this->stage($this->deathAndLoad(...), 5);
 	}
 
@@ -320,7 +306,6 @@ final class CoreSuite{
 		if($this->spawnObserver !== null){ HandlerListManager::global()->unregisterAll($this->spawnObserver); $this->spawnObserver = null; }
 		$this->player->close();
 		$this->villager->close();
-		$this->metrics['baseline_count'] = 200;
 		for($i = 0; $i < 200; ++$i){
 			$entity = $i % 2 === 0 ? new Human($this->location(), $this->skin) : new Villager($this->location());
 			$entity->setHasGravity(false);
@@ -372,7 +357,8 @@ final class CoreSuite{
 		$this->check($this->manager->count() === 0, 'mass cleanup');
 		$this->player = $this->manager->createPlayer($this->location(), $this->skin, 'ShutdownProbe');
 		$this->complete = true;
-		$this->plugin->getLogger()->info('P1P2 CORE READY');
+		$this->plugin->getLogger()->info('lifecycle suite done');
+		($this->next)();
 	}
 
 	private function cpuMicros() : int{
@@ -392,6 +378,6 @@ final class CoreSuite{
 			$this->check($this->manager->isClosed() && $this->manager->count() === 0 && $this->player->isClosed(), 'shutdown automatically closes owner context');
 		}catch(Throwable $error){ $this->error ??= $error::class . ': ' . $error->getMessage(); }
 		$result = ['result' => $this->complete && $this->error === null ? 'PASS' : 'FAIL', 'assertions' => count($this->passed), 'passed' => $this->passed, 'error' => $this->error, 'metrics' => $this->metrics];
-		file_put_contents($this->plugin->getDataFolder() . 'p1p2-result.json', json_encode($result, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT));
+		file_put_contents($this->plugin->getDataFolder() . 'lifecycle-result.json', json_encode($result, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT));
 	}
 }
