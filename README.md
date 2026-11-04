@@ -16,7 +16,7 @@ Static NPCs sleep between changes, so thousands of them cost almost nothing per 
 
 ```
 composer config repositories.npc-lib vcs https://github.com/vapebw/npc-lib
-composer require vapebw/npc-lib:dev-main
+composer require vapebw/npc-lib:^0.1
 ```
 
 Initialize `vendor/autoload.php` once in `onLoad()` and declare `api = ["6.0.0"]` in your `plugin.toml`.
@@ -66,7 +66,7 @@ if(!in_array('guide', $saved->ids(), true)){
 
 ## Notes
 
-- Plugins on the same server must ship the exact same version of `NpcLib\`, since PHP shares classes across PHARs.
+- Plugins on the same server must ship the exact same build of `NpcLib\`, since PHP shares classes across PHARs. Call `Package::assertBundledBuild($this->getFile() . 'vendor/vapebw/npc-lib/src')` in `onEnable()` to check it.
 - Public API is `NpcManager`, `Npc` and its typed subclasses, `PersistentNpcs` and the `NpcLib\entity` contract. Anything under `NpcLib\internal` can change.
 - `composer check` runs the lint, unit tests and PHPStan. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
