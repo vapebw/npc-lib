@@ -33,7 +33,7 @@ final class Main extends PluginBase{
 		if(getenv('NPCLIB_SUITE') === '1'){
 			$this->lifecycle = new LifecycleSuite($this, function() : void{
 				$this->features = new FeatureSuite($this, function() : void{
-					$this->environment = new EnvironmentSuite($this, function() : void{ $this->getLogger()->info('feature suite done'); });
+					$this->environment = new EnvironmentSuite($this, function() : void{ new PersistenceSuite($this, function() : void{ $this->getLogger()->info('feature suite done'); }); });
 				});
 			});
 		}

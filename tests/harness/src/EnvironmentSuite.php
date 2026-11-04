@@ -19,7 +19,6 @@ use quark\world\World;
 use RuntimeException;
 use Throwable;
 
-/** Environmental hazards against npcs that sleep between explicit changes. */
 final class EnvironmentSuite{
 	private NpcManager $manager;
 	private World $world;
@@ -129,7 +128,7 @@ final class EnvironmentSuite{
 		$this->entity('water-later')->setAirSupplyTicks(1);
 		$this->npcs['void-teleport']->teleport($this->at(4, -90.0));
 		$this->world->setBlockAt($this->x(5), 16, 8, VanillaBlocks::LAVA());
-		// changes nobody announces: quark never tells the entity
+		// silent changes, quark never tells the entity
 		$this->body(6, VanillaBlocks::STONE(), false);
 		$this->body(7, VanillaBlocks::STONE(), false);
 		$this->stage($this->observe(...), 80);

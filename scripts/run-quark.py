@@ -34,7 +34,7 @@ quarkserver.initialize(data, plugins, env, php, run / "initialize.log")
 shutil.copy2(args.artifact, plugins / "NpcLibHarness.phar")
 if args.suite:
     shutil.copy2(args.artifact.parent / "NpcLibPeer.phar", plugins / "NpcLibPeer.phar")
-    for stale in ("lifecycle-result.json", "feature-result.json"):
+    for stale in ("lifecycle-result.json", "feature-result.json", "environment-result.json", "persistence-result.json"):
         (data / "data/plugins/NpcLibHarness" / stale).unlink(missing_ok=True)
 quarkserver.write_config(data, 29174)
 command = quarkserver.command(data, plugins, php)
@@ -81,6 +81,10 @@ except subprocess.TimeoutExpired:
     code = process.wait()
 reader.join()
 output = "".join(lines)
+expected_snapshot_errors = [line for line in lines if any(f"NPC snapshot failed for {id}; original file preserved: Invalid or oversized NPC string" in line for id in ("invalidState", "secondInvalidState"))]
+expected_unload_errors = [line for line in lines if "NPC unload save failed; unload cancelled and original file preserved: Invalid or oversized NPC string" in line]
+expected_callback_errors = [line for index, line in enumerate(lines[:-1]) if "Unhandled exception" in line and any(token in lines[index + 1] for token in ("runtime callback sentinel", "chunk restore sentinel"))]
+error_output = "".join(line for line in lines if line not in expected_snapshot_errors and line not in expected_unload_errors and line not in expected_callback_errors)
 checks = {
     "ready": ready.is_set(),
     "enabled": "Enabling NpcLibHarness" in output and "harness LOAD PASS" in output,
@@ -89,7 +93,7 @@ checks = {
     "world_unloaded": 'Unloading world "world"' in output,
     "exit_zero": code == 0,
     "not_force_killed": not forced,
-    "no_errors": re.search(r"Fatal error|Uncaught |\[ERROR\]|\b(?:ERROR|CRIT|ALERT|EMERG)\s", output) is None,
+    "no_errors": re.search(r"Fatal error|Uncaught |\[ERROR\]|\b(?:ERROR|CRIT|ALERT|EMERG)\s", error_output) is None,
     "no_crash_reports": not any((data / "diagnostics/crashes").glob("*")),
 }
 if args.suite:
@@ -105,6 +109,13 @@ if args.suite:
     environment = json.loads(environment_file.read_text(encoding="utf8")) if environment_file.exists() else {"result": "MISSING"}
     (run / "environment.json").write_text(json.dumps(environment, indent=2) + "\n", encoding="utf8")
     checks["environment_suite"] = environment["result"] == "PASS"
+    persistence_file = data / "data/plugins/NpcLibHarness/persistence-result.json"
+    persistence = json.loads(persistence_file.read_text(encoding="utf8")) if persistence_file.exists() else {"result": "MISSING"}
+    (run / "persistence.json").write_text(json.dumps(persistence, indent=2) + "\n", encoding="utf8")
+    checks["persistence_suite"] = persistence["result"] == "PASS"
+    checks["expected_unload_failure"] = len(expected_unload_errors) == 1 and "failed snapshot cancels chunk unload before monitor observers" in persistence.get("passed", [])
+    checks["expected_snapshot_failure"] = len(expected_snapshot_errors) == 2 and "invalid state does not interrupt native cleanup" in persistence.get("passed", [])
+    checks["expected_callback_failure"] = len(expected_callback_errors) == 2 and "definition kept after a callback failure restores later" in persistence.get("passed", []) and "failed definition in a chunk load stays dormant without blocking the rest" in persistence.get("passed", [])
 summary = {"quark": sha, "exit": code, "checks": checks, "result": "PASS" if all(checks.values()) else "FAIL"}
 (run / "result.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf8")
 print(json.dumps(summary, indent=2), flush=True)

@@ -8,6 +8,9 @@ from pathlib import Path
 root = Path(__file__).resolve().parent.parent
 shutil.rmtree(root / "work/wire/server/data/worlds/world", ignore_errors=True)
 
+for name in ("npcs.json", "npcs.json.lock"):
+    (root / "work/wire/server/data/plugins/NpcLibHarness" / name).unlink(missing_ok=True)
+
 server = subprocess.Popen([sys.executable, str(root / "scripts/run-wire-server.py")], cwd=root, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 server_lines: list[str] = []
 ready = threading.Event()

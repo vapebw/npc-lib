@@ -182,7 +182,35 @@ async function main() {
     const results = observers.map(o => ({ o, scales: [kit.ids.pl, kit.ids.zb, kit.ids.vl].map(id => metaValue(meta(offset, o, id), 'scale')), sneaking: flag(meta(offset, o, kit.ids.pl), 'sneaking'), invisible: flag(meta(offset, o, kit.ids.zb), 'invisible'), player: since(offset, 'move_entity', o, kit.ids.pl).at(-1)?.packet.rotation }))
     check('kit-reset', results.every(r => r.scales.every(v => v === 1) && !r.sneaking && !r.invisible && close(r.player.pitch, 0) && close(r.player.yaw, 0)), { results })
   })
-  check('client-errors', !wire.some(e => ['error', 'action_error', 'kick'].includes(e.event)), { errors: wire.filter(e => ['error', 'action_error', 'kick'].includes(e.event)) })
+  await scenario('persistent-reload', async () => {
+    await command('persist')
+    const old = active(await snapshot('22-permanent')).map(n => n.id)
+    await command('far NpcProbeA'); await command('far NpcProbeB'); await sleep(1800)
+    await command('persist-reload'); await sleep(1000)
+    const offset = wire.length
+    await command('near NpcProbeA'); await command('near NpcProbeB'); await sleep(2500)
+    s = await snapshot('23-permanent-restored')
+    const rows = active(s)
+    check('persistent-reload', s.error === null && rows.length === 3 && rows.every(n => !old.includes(n.id) && n.viewers.length === 2) && observers.every(o => rows.every(n => since(offset, n.name === 'KitPlayer' ? 'add_player' : 'add_entity', o, n.id).length === 1)), { restored: rows })
+    const restoredPlayer = rows.find(n => n.name === 'KitPlayer')
+    check('persistent-equipment', restoredPlayer != null && observers.every(o => since(offset, 'add_player', o, restoredPlayer.id)[0]?.packet.held_item?.network_id === kit.expected.newMain && armorOf(offset, o, restoredPlayer.id)?.[0] === kit.expected.newHelmet))
+    send({player: 'NpcProbeB', action: 'close'}); await sleep(700)
+    const restoredReconnect = wire.length
+    send({player: 'NpcProbeB', action: 'reconnect'}); await sleep(3500)
+    s = await snapshot('23b-permanent-reconnect')
+    check('persistent-reconnect', active(s).length === 3 && active(s).every(n => n.viewers.length === 2 && since(restoredReconnect, n.name === 'KitPlayer' ? 'add_player' : 'add_entity', 'NpcProbeB', n.id).length === 1))
+    const removed = wire.length
+    const ids = rows.map(n => n.id)
+    await command('persist-delete'); await sleep(1000)
+    s = await snapshot('24-permanent-deleted')
+    check('persistent-delete', s.error === null && s.count === 0 && observers.every(o => ids.every(id => since(removed, 'remove_entity', o, id).length === 1)))
+    send({player: 'NpcProbeB', action: 'close'}); await sleep(700)
+    const reconnect = wire.length
+    send({player: 'NpcProbeB', action: 'reconnect'}); await sleep(3500)
+    s = await snapshot('25-permanent-deleted-reconnect')
+    check('persistent-delete-reconnect', s.count === 0 && !wire.slice(reconnect).some(e => ['add_player', 'add_entity'].includes(e.event) && ids.includes(Number(e.packet?.runtime_id))))
+  })
+  check('client-errors' , !wire.some(e => ['error', 'action_error', 'kick'].includes(e.event)), { errors: wire.filter(e => ['error', 'action_error', 'kick'].includes(e.event)) })
   fs.writeFileSync(path.join(outputDir, 'latest-suite.json'), JSON.stringify({ evidence, results, childPid: child.pid }, null, 2))
   finished = true
   console.log('SUITE_FINISHED_CLIENTS_STAY_CONNECTED ' + evidence)

@@ -32,6 +32,7 @@ use WeakReference;
 
 final class WireFixture{
 	private NpcManager $manager;
+	private ?\NpcLib\PersistentNpcs $permanent = null;
 	/** @var array<int, Npc> */
 	private array $handles = [];
 	/** @var array<int, WeakReference<Entity>> */
@@ -83,6 +84,28 @@ final class WireFixture{
 		$this->error = null;
 		try{
 			switch($args[0] ?? 'state'){
+				case 'persist':
+					$this->permanent ??= $this->manager->enablePersistence(function(string $id, Npc $npc) : void{ $this->watch($npc); });
+					foreach($this->manager->getAll() as $npc){ $this->permanent->remember('wire' . $npc->getId(), $npc); }
+					break;
+				case 'persist-reload':
+					$store = $this->permanent ?? throw new RuntimeException('Enable persistence first');
+					// move observers away so no player sits in the chunks under test
+					$home = $this->home ?? throw new RuntimeException('Create NPCs first');
+					$world = $home->getWorld();
+					$chunks = [];
+					foreach($this->manager->getAll() as $npc){ $at = $npc->getLocation(); $chunks[$world::chunkHash($at->getFloorX() >> 4, $at->getFloorZ() >> 4)] = [$at->getFloorX() >> 4, $at->getFloorZ() >> 4]; }
+					$world->save(true);
+					foreach($chunks as [$x, $z]){ if(!$world->unloadChunk($x, $z, false)){ throw new RuntimeException('Chunk unload failed'); } }
+					$store->restore();
+					foreach($chunks as [$x, $z]){ $world->loadChunk($x, $z); }
+					$store->restore(); $store->restore();
+					break;
+				case 'persist-delete':
+					$store = $this->permanent ?? throw new RuntimeException('Enable persistence first');
+					foreach($store->ids() as $id){ $store->delete($id); }
+					$store->restore();
+					break;
 				case 'create': $this->create($args[1] ?? 'NpcProbeA'); break;
 				case 'spawn-close': $this->spawnClose(); break;
 				case 'kit-create': $this->createKit($args[1] ?? 'NpcProbeA'); break;
