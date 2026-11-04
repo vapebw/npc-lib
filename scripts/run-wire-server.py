@@ -1,12 +1,13 @@
 import json
-import os
 import shutil
 import subprocess
 import sys
 import threading
 from pathlib import Path
 
-root = Path(__file__).resolve().parent.parent
+import quarkserver
+
+root = quarkserver.ROOT
 base = root / "work/wire"
 data = base / "server"
 plugins = data / "plugins"
@@ -14,38 +15,12 @@ logs = base / "logs"
 plugins.mkdir(parents=True, exist_ok=True)
 logs.mkdir(parents=True, exist_ok=True)
 
-bin_dir = root / "work/quark-runtime/bin/php"
-env = os.environ.copy()
-env["PHP_INI_SCAN_DIR"] = ""
-env["OPENSSL_CONF"] = str(bin_dir / "extras/ssl/openssl.cnf")
-env["OPENSSL_MODULES"] = str(bin_dir / "extras/ssl")
-env["NPCLIB_WIRE"] = "1"
-env.pop("NPCLIB_SUITE", None)
-env.pop("COMPOSER", None)
-php = [str(bin_dir / "php.exe"), "-c", str(bin_dir / "php.ini"), "-d", "extension_dir=" + str(bin_dir / "ext")]
-
-init = r"require $argv[1]; (new \quark\FilesystemMigration(new \quark\FilesystemPaths($argv[2], $argv[3])))->prepare();"
-subprocess.run(php + ["-r", init, str(root / "work/quark/vendor/autoload.php"), str(data), str(plugins)], cwd=root, env=env, check=True)
+env = quarkserver.environment(NPCLIB_WIRE="1")
+quarkserver.initialize(data, plugins, env)
 shutil.copy2(root / "work/artifacts/NpcLibHarness.phar", plugins / "NpcLibHarness.phar")
+quarkserver.write_config(data, 29184, raknet=True)
 
-config = (root / "work/quark/resources/server.toml").read_text(encoding="utf8").replace("\n[server]\n", "\n[server]\nserver-ip = '127.0.0.1'\n")
-for before, after in {
-    "transport.name = 'nethernet'": "transport.name = 'raknet'",
-    "transport.nethernet.lan-discovery = true": "transport.nethernet.lan-discovery = false",
-    "server-port = 19132": "server-port = 29184",
-    "server-portv6 = 19133": "server-portv6 = 29185",
-    "enable-ipv6 = true": "enable-ipv6 = false",
-    "enable-query = true": "enable-query = false",
-    "enable-dev-builds = false": "enable-dev-builds = true",
-    "async-workers = 'auto'": "async-workers = 2",
-    "level-type = 'DEFAULT'": "level-type = 'FLAT'",
-    "view-distance = 16": "view-distance = 4",
-    "xbox-auth = true": "xbox-auth = false",
-}.items():
-    config = config.replace(before, after)
-(data / "config/server.toml").write_text(config, encoding="utf8")
-
-command = php + [str(root / "work/quark/src/Quark.php"), "--no-wizard", "--disable-ansi", "--disable-readline", "--data=" + str(data), "--plugins=" + str(plugins), "--server.server-ip=127.0.0.1"]
+command = quarkserver.command(data, plugins)
 (logs / "command.json").write_text(json.dumps(command, indent=2), encoding="utf8")
 server = subprocess.Popen(command, cwd=root, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 

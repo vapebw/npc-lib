@@ -1,13 +1,14 @@
 import argparse
 import hashlib
 import json
-import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import threading
 import time
+
+import quarkserver
 
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser()
@@ -24,55 +25,20 @@ data = run / "server"
 plugins = data / "plugins"
 plugins.mkdir(parents=True, exist_ok=True)
 php = args.php.resolve(strict=True)
-ini = php.parent / "php.ini"
-php_args = [str(php), "-c", str(ini), "-d", "extension_dir=" + str(php.parent / "ext")]
-env = os.environ.copy()
-env["PHP_INI_SCAN_DIR"] = ""
-env["OPENSSL_CONF"] = str(php.parent / "extras/ssl/openssl.cnf")
-env["OPENSSL_MODULES"] = str(php.parent / "extras/ssl")
-env.pop("COMPOSER", None)
-env.pop("NPCLIB_WIRE", None)
-if args.suite:
-    env["NPCLIB_SUITE"] = "1"
-quark = root / "work/quark"
-sha = subprocess.check_output(["git", "-C", str(quark), "rev-parse", "HEAD"], text=True).strip()
-expected_sha = json.loads((root / "composer.json").read_text(encoding="utf8"))["extra"]["quark-source"]["ref"]
-if sha != expected_sha:
-    raise RuntimeError("Quark revision mismatch")
-subprocess.run(["git", "-C", str(quark), "diff", "--exit-code", "HEAD"], check=True)
-metadata_code = 'require $argv[1]; echo json_encode(["root"=>\\Composer\\InstalledVersions::getRootPackage(),"ref"=>\\Composer\\InstalledVersions::getReference("quark/quark"),"bedwire"=>phpversion("bedwire"),"toml"=>phpversion("toml"),"chunkutils2"=>phpversion("chunkutils2"),"protocol"=>\\Bedwire\\Protocol::VERSION], JSON_THROW_ON_ERROR);'
-metadata = json.loads(subprocess.check_output(php_args + ["-r", metadata_code, str(quark / "vendor/autoload.php")], cwd=root, env=env))
-if metadata["ref"] != expected_sha:
-    raise RuntimeError("Composer reference does not match Quark source")
-metadata["php_sha256"] = hashlib.sha256(php.read_bytes()).hexdigest()
+env = quarkserver.environment(php, **({"NPCLIB_SUITE": "1"} if args.suite else {}))
+sha = quarkserver.verify_source()
+metadata = quarkserver.metadata(php, env)
 metadata["phar_sha256"] = hashlib.sha256(args.artifact.read_bytes()).hexdigest()
-metadata["ini_sha256"] = hashlib.sha256(ini.read_bytes()).hexdigest()
 (run / "runtime.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf8")
-init_code = 'require $argv[1]; (new \\quark\\FilesystemMigration(new \\quark\\FilesystemPaths($argv[2], $argv[3])))->prepare();'
-init = php_args + ["-r", init_code, str(quark / "vendor/autoload.php"), str(data), str(plugins)]
-with (run / "initialize.log").open("wb") as log:
-    subprocess.run(init, cwd=root, env=env, check=True, stdout=log, stderr=subprocess.STDOUT)
+quarkserver.initialize(data, plugins, env, php, run / "initialize.log")
 shutil.copy2(args.artifact, plugins / "NpcLibHarness.phar")
 if args.suite:
     shutil.copy2(args.artifact.parent / "NpcLibPeer.phar", plugins / "NpcLibPeer.phar")
     for stale in ("lifecycle-result.json", "feature-result.json"):
         (data / "data/plugins/NpcLibHarness" / stale).unlink(missing_ok=True)
-config = (quark / "resources/server.toml").read_text(encoding="utf8").replace("\n[server]\n", "\n[server]\nserver-ip = '127.0.0.1'\n")
-for before, after in {
-    "transport.nethernet.lan-discovery = true": "transport.nethernet.lan-discovery = false",
-    "server-port = 19132": "server-port = 29174",
-    "server-portv6 = 19133": "server-portv6 = 29175",
-    "enable-ipv6 = true": "enable-ipv6 = false",
-    "enable-dev-builds = false": "enable-dev-builds = true",
-    "async-workers = 'auto'": "async-workers = 2",
-    "level-type = 'DEFAULT'": "level-type = 'FLAT'",
-    "view-distance = 16": "view-distance = 4",
-    "enable-query = true": "enable-query = false",
-}.items():
-    config = config.replace(before, after)
-(data / "config/server.toml").write_text(config, encoding="utf8")
-command = php_args + [str(quark / "src/Quark.php"), "--no-wizard", "--disable-ansi", "--disable-readline", "--data=" + str(data), "--plugins=" + str(plugins), "--server.server-ip=127.0.0.1"]
-(run / "commands.json").write_text(json.dumps({"initialize": init, "server": command, "stdin": ["version", "status", "stop"]}, indent=2) + "\n", encoding="utf8")
+quarkserver.write_config(data, 29174)
+command = quarkserver.command(data, plugins, php)
+(run / "commands.json").write_text(json.dumps({"server": command, "stdin": ["version", "status", "stop"]}, indent=2) + "\n", encoding="utf8")
 ready = threading.Event()
 suite_done = threading.Event()
 lines = []
@@ -135,6 +101,10 @@ if args.suite:
     features = json.loads(feature_file.read_text(encoding="utf8")) if feature_file.exists() else {"result": "MISSING"}
     (run / "features.json").write_text(json.dumps(features, indent=2) + "\n", encoding="utf8")
     checks["feature_suite"] = features["result"] == "PASS"
+    environment_file = data / "data/plugins/NpcLibHarness/environment-result.json"
+    environment = json.loads(environment_file.read_text(encoding="utf8")) if environment_file.exists() else {"result": "MISSING"}
+    (run / "environment.json").write_text(json.dumps(environment, indent=2) + "\n", encoding="utf8")
+    checks["environment_suite"] = environment["result"] == "PASS"
 summary = {"quark": sha, "exit": code, "checks": checks, "result": "PASS" if all(checks.values()) else "FAIL"}
 (run / "result.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf8")
 print(json.dumps(summary, indent=2), flush=True)

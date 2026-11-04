@@ -2,8 +2,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const readline = require('node:readline')
 const crypto = require('node:crypto')
-const bedrock = require('bedrock-protocol')
-const VERSION = '1.26.51'
+const { openSession, VERSION } = require('./session.cjs')
 const players = new Map()
 const outputDir = path.resolve(__dirname, '../../work/wire/client')
 fs.mkdirSync(outputDir, { recursive: true })
@@ -31,9 +30,7 @@ function commandPacket(command) {
 function connect(name) {
   if (players.get(name)?.client && !players.get(name).client._closed) throw Error('player is already connected')
   const state = { name, entities: new Map(), position: null, chunks: 0 }
-  const client = bedrock.createClient({ host: '127.0.0.1', port: Number(process.env.NPC_TEST_PORT || 29184), version: VERSION,
-    transport: 'raknet', offline: true, username: name, raknetBackend: 'raknet-native', useRaknetWorkers: false,
-    skinData: { ProfileHash: '' }, skipPing: true, profilesFolder: path.join(outputDir, 'auth-cache'), autoInitPlayer: true, conLog: null })
+  const client = openSession(name, { port: Number(process.env.NPC_TEST_PORT || 29184), profilesFolder: path.join(outputDir, 'auth-cache') })
   state.client = client
   players.set(name, state)
   for (const event of ['loggingIn', 'join', 'spawn', 'close']) client.on(event, () => log(event, { player: name, chunks: state.chunks }))
