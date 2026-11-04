@@ -1,6 +1,7 @@
 param(
     [string]$Composer = $env:NPCLIB_COMPOSER,
-    [string]$Php85 = $env:NPCLIB_PHP85
+    [string]$Php85 = $env:NPCLIB_PHP85,
+    [string]$Php85Ini = $(if($env:NPCLIB_PHP85_INI){ $env:NPCLIB_PHP85_INI } else { Join-Path $PSScriptRoot 'php85.ini' })
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,6 +27,7 @@ function Check([string]$name, [string]$exe, [string[]]$arguments){
 }
 
 $prefix84 = @('-c', "$bin84/php.ini", '-d', "extension_dir=$bin84/ext")
+$prefix85 = @('-c', (Resolve-Path $Php85Ini).Path, '-d', ('extension_dir=' + (Join-Path (Split-Path (Resolve-Path $Php85).Path -Parent) 'ext')))
 $harness = '--working-dir=tests/harness'
 Check 'install' $php84 ($prefix84 + @($Composer, 'install', '--no-interaction'))
 Check 'stage' $php84 ($prefix84 + @($Composer, 'stage:package'))
@@ -42,9 +44,9 @@ Check 'build-bench' $php84 ($prefix84 + @($Composer, 'build:bench'))
 Check 'quality-84' $php84 ($prefix84 + @($Composer, 'check'))
 Check 'phar-84' $php84 ($prefix84 + @($Composer, 'test:phar'))
 Check 'analyse-harness-84' $php84 ($prefix84 + @($Composer, 'analyse:harness'))
-Check 'quality-85' $Php85 @('-c', 'work/php85.ini', $Composer, 'check')
-Check 'phar-85' $Php85 @('-c', 'work/php85.ini', $Composer, 'test:phar')
-Check 'analyse-harness-85' $Php85 @('-c', 'work/php85.ini', $Composer, 'analyse:harness')
+Check 'quality-85' $Php85 ($prefix85 + @($Composer, 'check'))
+Check 'phar-85' $Php85 ($prefix85 + @($Composer, 'test:phar'))
+Check 'analyse-harness-85' $Php85 ($prefix85 + @($Composer, 'analyse:harness'))
 Check 'quark-platform' $php84 ($prefix84 + @($Composer, '--working-dir=work/quark', 'check-platform-reqs', '--no-dev'))
 Check 'quark-version' $php84 ($prefix84 + @('work/quark/src/Quark.php', '--version'))
 Check 'python-syntax' 'python' @('-c', "from pathlib import Path; [compile(Path(p).read_text(encoding='utf8'), p, 'exec') for p in ['scripts/run-quark.py', 'scripts/run-wire-server.py', 'scripts/run-bedrock.py', 'scripts/quarkserver.py', 'bench/runner/cli.py', 'bench/runner/server.py', 'bench/runner/counters.py', 'bench/runner/viewers.py', 'bench/runner/report.py', 'bench/runner/tables.py', 'bench/runner/stats.py', 'bench/runner/schedule.py', 'bench/runner/experiments.py', 'bench/runner/validate.py']]; print('PASS')")

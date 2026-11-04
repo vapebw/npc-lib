@@ -15,8 +15,8 @@ composer check
 `composer check` validates the manifest, lints, runs PHPUnit and PHPStan (strict rules).
 It has to pass before a pull request is merged.
 
-The Quark server suites (`scripts/verify.ps1`, `scripts/run-quark.py`, `scripts/run-bedrock.py`)
-run the library on a real server. They need a Quark checkout at the commit pinned in `composer.json`;
+The Quark server suites (`scripts/verify.ps1` is PowerShell and Windows only, plus `scripts/run-quark.py` and `scripts/run-bedrock.py`)
+run the library on a real server and write their output to `work/`, which is git-ignored. They need a Quark checkout at the commit pinned in `composer.json`;
 `scripts/prepare-quark.ps1` fetches it. Run them when you touch entity, lifecycle or networking code.
 
 ## Code style

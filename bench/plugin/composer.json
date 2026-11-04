@@ -2,7 +2,7 @@
   "name": "vapebw/npc-lib-bench",
   "description": "Benchmark plugin for npc-lib",
   "type": "quark-plugin",
-  "license": "proprietary",
+  "license": "MIT",
   "repositories": [
     {
       "type": "path",

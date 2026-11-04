@@ -2,7 +2,12 @@
 
 declare(strict_types=1);
 
-$path = dirname(__DIR__) . '/work/artifacts/NpcLibHarness.phar';
+$arguments = $_SERVER['argv'] ?? [];
+if(!is_array($arguments)){ throw new InvalidArgumentException('Command line arguments unavailable'); }
+$input = $arguments[1] ?? dirname(__DIR__) . '/work/artifacts/NpcLibHarness.phar';
+if(!is_string($input)){ throw new InvalidArgumentException('Expected PHAR path'); }
+$path = realpath($input);
+if($path === false){ throw new RuntimeException('Missing PHAR'); }
 $phar = new Phar($path);
 foreach(['plugin.toml', 'src/Main.php', 'vendor/autoload.php', 'vendor/vapebw/npc-lib/src/Package.php'] as $name){
 	if(!isset($phar[$name])){

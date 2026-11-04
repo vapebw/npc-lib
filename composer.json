@@ -73,7 +73,9 @@
       "/.editorconfig",
       "/.gitignore",
       "/.gitattributes",
-      "/.phpunit.cache"
+      "/.phpunit.cache",
+      "/.github",
+      "/docs"
     ]
   }
 }
