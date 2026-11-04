@@ -3,3 +3,4 @@
 /.phpunit.cache/
 /tests/harness/vendor/
 /tests/bedrock/node_modules/
+/bench/plugin/vendor/

@@ -1,0 +1,122 @@
+{
+    "_readme": [
+        "This file locks the dependencies of your project to a known state",
+        "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
+        "This file is @generated automatically"
+    ],
+    "content-hash": "10b50a391ebf6d152ea0c40b2365fc63",
+    "packages": [
+        {
+            "name": "vapebw/npc-lib",
+            "version": "0.0.0-dev",
+            "dist": {
+                "type": "path",
+                "url": "../../work/package",
+                "reference": "2cc3ecddcd35d40180802bc83b91ea21bf16209e"
+            },
+            "require": {
+                "php": "~8.4.0 || ~8.5.0",
+                "php-64bit": "*"
+            },
+            "require-dev": {
+                "phpstan/phpstan": "^2.1",
+                "phpstan/phpstan-strict-rules": "^2.0",
+                "phpunit/phpunit": "^12.5"
+            },
+            "type": "library",
+            "extra": {
+                "quark-api": "6.0.0",
+                "quark-source": {
+                    "repository": "https://github.com/Bedrock-Phanatics/Quark",
+                    "ref": "0f91b13d470026cf6aefb5df649d32db9b0e342d"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "NpcLib\\": "src/"
+                }
+            },
+            "autoload-dev": {
+                "psr-4": {
+                    "NpcLibTests\\Unit\\": "tests/unit/",
+                    "NpcLibTests\\Integration\\": "tests/integration/"
+                }
+            },
+            "archive": {
+                "exclude": [
+                    "/work",
+                    "/vendor",
+                    "/tests",
+                    "/bench",
+                    "/scripts",
+                    "/composer.lock",
+                    "/phpstan*.neon",
+                    "/phpunit.xml",
+                    "/.editorconfig",
+                    "/.gitignore",
+                    "/.gitattributes",
+                    "/.phpunit.cache"
+                ]
+            },
+            "scripts": {
+                "lint": [
+                    "@php scripts/lint.php"
+                ],
+                "test": [
+                    "@php vendor/phpunit/phpunit/phpunit"
+                ],
+                "analyse": [
+                    "@php vendor/phpstan/phpstan/phpstan analyse --no-progress"
+                ],
+                "check": [
+                    "@composer validate --strict",
+                    "@composer check-platform-reqs",
+                    "@lint",
+                    "@test",
+                    "@analyse"
+                ],
+                "build:harness": [
+                    "@php -d phar.readonly=0 scripts/build-plugin.php tests/harness NpcLibHarness",
+                    "@php -d phar.readonly=0 scripts/build-plugin.php tests/peer NpcLibPeer"
+                ],
+                "build:bench": [
+                    "@php -d phar.readonly=0 scripts/build-plugin.php bench/plugin NpcLibBench"
+                ],
+                "test:phar": [
+                    "@php scripts/check-phar.php"
+                ],
+                "analyse:harness": [
+                    "@php vendor/phpstan/phpstan/phpstan analyse -c phpstan-harness.neon --no-progress"
+                ],
+                "stage:package": [
+                    "@composer archive --format=tar --dir=work/dist --file=npc-lib",
+                    "@php scripts/stage-package.php"
+                ]
+            },
+            "license": [
+                "proprietary"
+            ],
+            "description": "NPC library for Quark API 6.0.0",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        }
+    ],
+    "packages-dev": [],
+    "aliases": [],
+    "minimum-stability": "stable",
+    "stability-flags": {
+        "vapebw/npc-lib": 20
+    },
+    "prefer-stable": false,
+    "prefer-lowest": false,
+    "platform": {
+        "php": "~8.4.0 || ~8.5.0"
+    },
+    "platform-dev": {},
+    "platform-overrides": {
+        "php": "8.4.0"
+    },
+    "plugin-api-version": "2.9.0"
+}

@@ -1,0 +1,5 @@
+name = "NpcLibBench"
+main = "NpcLibBench\\Main"
+version = "0.0.0"
+api = ["6.0.0"]
+src-namespace-prefix = "NpcLibBench"

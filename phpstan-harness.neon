@@ -4,3 +4,4 @@ parameters:
 	paths:
 		- tests/harness/src
 		- tests/peer/src
+		- bench/plugin/src

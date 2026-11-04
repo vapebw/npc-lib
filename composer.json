@@ -48,7 +48,11 @@
       "@test",
       "@analyse"
     ],
-    "build:harness": "@php -d phar.readonly=0 scripts/build-harness.php",
+    "build:harness": [
+      "@php -d phar.readonly=0 scripts/build-plugin.php tests/harness NpcLibHarness",
+      "@php -d phar.readonly=0 scripts/build-plugin.php tests/peer NpcLibPeer"
+    ],
+    "build:bench": "@php -d phar.readonly=0 scripts/build-plugin.php bench/plugin NpcLibBench",
     "test:phar": "@php scripts/check-phar.php",
     "analyse:harness": "@php vendor/phpstan/phpstan/phpstan analyse -c phpstan-harness.neon --no-progress",
     "stage:package": [
@@ -61,6 +65,7 @@
       "/work",
       "/vendor",
       "/tests",
+      "/bench",
       "/scripts",
       "/composer.lock",
       "/phpstan*.neon",
