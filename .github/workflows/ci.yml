@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ['8.4', '8.5']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          tools: composer
+
+      - name: Fetch Quark
+        run: |
+          ref=$(php -r 'echo json_decode(file_get_contents("composer.json"), true)["extra"]["quark-source"]["ref"];')
+          git clone --no-checkout https://github.com/Bedrock-Phanatics/Quark.git work/quark
+          git -C work/quark checkout --detach "$ref"
+          composer install --working-dir=work/quark --no-dev --no-interaction --no-progress --ignore-platform-reqs
+
+      - run: composer install --no-interaction --no-progress
+      - run: composer check

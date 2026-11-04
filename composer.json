@@ -2,7 +2,7 @@
   "name": "vapebw/npc-lib",
   "description": "NPC library for Quark API 6.0.0",
   "type": "library",
-  "license": "proprietary",
+  "license": "MIT",
   "require": {
     "php": "~8.4.0 || ~8.5.0",
     "php-64bit": "*"
