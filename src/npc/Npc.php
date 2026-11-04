@@ -58,6 +58,8 @@ abstract class Npc{
 	final public function getViewerCount() : int{ return count($this->requireEntity()->getViewers()); }
 	final public function isStatic() : bool{ return $this->requireEntity()->isStationary(); }
 	final public function setStatic(bool $value) : void{ $this->requireEntity()->setStationary($value); }
+	final public function isEnvironmental() : bool{ return $this->requireEntity()->isEnvironmental(); }
+	final public function setEnvironmental(bool $value) : void{ $this->requireEntity()->setEnvironmental($value); }
 	final public function setMotion(Vector3 $motion) : bool{
 		$entity = $this->requireEntity();
 		if($entity->isStationary()){ throw new LogicException('Enable movement before setting motion'); }

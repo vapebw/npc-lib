@@ -15,6 +15,7 @@ trait EntityLifecycle{
 	private int $nativeDepth = 0;
 	private bool $closePending = false;
 	private bool $stationary = true;
+	private bool $environmental = false;
 
 	public function requestClose() : void{
 		// native code still needs inventories until the outer call returns
@@ -39,6 +40,21 @@ trait EntityLifecycle{
 	// npcs never drop equipment or xp on death
 	public function getDrops() : array{ return []; }
 	public function getXpDropAmount() : int{ return 0; }
+
+	// static npcs sleep through random chunk ticks, quark wakes them itself on block changes and the lib on explicit changes
+	// environmental ones keep ticking like native entities, which also catches changes quark never announces
+	public function onRandomUpdate() : void{
+		if(!$this->stationary || $this->environmental){ parent::onRandomUpdate(); }
+	}
+
+	public function setEnvironmental(bool $value) : void{
+		$this->environmental = $value;
+		$this->wake();
+	}
+
+	public function isEnvironmental() : bool{
+		return $this->environmental;
+	}
 
 	private function wake() : void{
 		if(!$this->isClosed()){ $this->scheduleUpdate(); }

@@ -10,6 +10,8 @@ interface NpcEntity{
 	public function requestClose() : void;
 	public function setStationary(bool $value) : void;
 	public function isStationary() : bool;
+	public function setEnvironmental(bool $value) : void;
+	public function isEnvironmental() : bool;
 
 	/**
 	 * @template T
