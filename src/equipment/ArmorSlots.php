@@ -20,6 +20,7 @@ trait ArmorSlots{
 	public function setBoots(?Item $item) : void{ $this->setArmorSlot(ArmorInventory::SLOT_FEET, $item); }
 
 	private function applyArmor(Equipment $equipment) : void{
+		$this->requireEntity();
 		$slots = array_filter([ArmorInventory::SLOT_HEAD => $equipment->helmet, ArmorInventory::SLOT_CHEST => $equipment->chestplate, ArmorInventory::SLOT_LEGS => $equipment->leggings, ArmorInventory::SLOT_FEET => $equipment->boots], static fn(?Item $item) : bool => $item !== null);
 		foreach($slots as $slot => $item){ $this->validateArmorSlot($slot, $item); }
 		foreach($slots as $slot => $item){ $this->setArmorSlot($slot, $item); }

@@ -18,6 +18,7 @@ final class ZombieNpc extends EntityNpc{
 	}
 
 	public function equip(Equipment $equipment) : void{
+		$this->requireEntity();
 		if($equipment->mainHand !== null || $equipment->offHand !== null){ throw new InvalidArgumentException('Zombie NPCs only support armor'); }
 		$this->applyArmor($equipment);
 	}

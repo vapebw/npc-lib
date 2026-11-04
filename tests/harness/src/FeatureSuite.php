@@ -267,6 +267,7 @@ final class FeatureSuite{
 		$this->throws(fn() => $hand->getMainHand(), LogicException::class, 'closed NPC rejects equipment access');
 		$this->throws(fn() => $closer->setScale(2.0), LogicException::class, 'closed NPC rejects appearance');
 		$this->throws(fn() => $closer->lookAt(new Vector3(1, 1, 1)), LogicException::class, 'closed NPC rejects lookAt');
+		$this->throws(fn() => $closer->equip(new Equipment()), LogicException::class, 'closed NPC rejects empty equipment');
 		$this->stage($this->combat(...), 3);
 	}
 
