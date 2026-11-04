@@ -26,6 +26,7 @@ final readonly class Config{
 		public int $maxSeconds,
 		public int $maxMemoryMb,
 		public bool $environmental = false,
+		public bool $persistent = false,
 	){
 		if($count < 0 || $viewers < 0 || $windowSeconds <= 0 || $warmupSeconds < 0 || $managers < 0){ throw new InvalidArgumentException('Invalid scenario numbers'); }
 		if(!in_array($layout, ['spread', 'concentrated'], true)){ throw new InvalidArgumentException('Unknown layout ' . $layout); }
@@ -55,6 +56,7 @@ final readonly class Config{
 			self::int($data, 'max_seconds', 600),
 			self::int($data, 'max_memory_mb', 3000),
 			(bool) ($data['environmental'] ?? false),
+			(bool) ($data['persistent'] ?? false),
 		);
 	}
 

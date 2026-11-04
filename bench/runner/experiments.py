@@ -132,5 +132,15 @@ def soak(seconds: float = 300.0) -> list[Cell]:
             for mode in ("npclib", "native")]
 
 
-EXPERIMENTS = {"smoke": smoke, "calibration": calibration, "control": control, "scale": scale, "viewers": viewers, "scale_viewers": scale_viewers, "operations": operations, "scale_traffic": scale_traffic, "environmental": environmental,
+def persistence_regression() -> list[Cell]:
+    cells = [Cell("regression-empty-v2", scenario("empty", viewers=2), 2)]
+    cells += [Cell(f"regression-{mode}-mixed-{count}-v2", scenario(mode, count=count, viewers=2), 2)
+              for count in (100, 500, 1000) for mode in ("npclib", "native")]
+    cells += [Cell("regression-persistent-mixed-100-v2", {**scenario("npclib", count=100, viewers=2), "persistent": True}, 2),
+              Cell("regression-environmental-mixed-100-v2", {**scenario("npclib", count=100, viewers=2), "environmental": True}, 2)]
+    return cells
+
+
+EXPERIMENTS = {
+    "persistence_regression": persistence_regression,"smoke": smoke, "calibration": calibration, "control": control, "scale": scale, "viewers": viewers, "scale_viewers": scale_viewers, "operations": operations, "scale_traffic": scale_traffic, "environmental": environmental,
                "viewer_churn": viewer_churn, "damage": damage, "damage_raw": damage_raw, "events": events, "churn": churn, "leaks": leaks, "soak": soak}

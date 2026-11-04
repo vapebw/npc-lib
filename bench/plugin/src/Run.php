@@ -102,6 +102,10 @@ final class Run{
 				$perEntity[] = hrtime(true) - $before;
 			}
 			$this->phases['create'] = ['count' => count($locations), 'total_ns' => hrtime(true) - $start, 'per_entity_ns' => $perEntity];
+			if($this->config->persistent && $this->population instanceof NpcLibPopulation){
+				$this->phases['persistence'] = $this->population->profilePersistence($this->plugin);
+				$this->managers = [$this->population->manager()];
+			}
 			foreach($this->population->slots() as $slot){ $this->weak[] = WeakReference::create($this->population->entity($slot)); }
 		}
 		if(($this->config->workload['kind'] ?? '') === 'foreign_damage'){
@@ -115,7 +119,7 @@ final class Run{
 	private function createPopulation(Skin $skin) : Population{
 		if($this->config->mode !== Mode::NpcLib){ return new NativePopulation($this->plugin, $skin, $this->config->mode); }
 		for($i = 0; $i < max(1, $this->config->managers); ++$i){ $this->managers[] = new NpcManager($this->plugin); }
-		return new NpcLibPopulation($this->managers[0], $this->world, $skin, $this->config->environmental);
+		return new NpcLibPopulation($this->managers[0], $this->world, $skin, $this->config->environmental, $this->config->persistent ? $this->managers[0]->enablePersistence(static function() : void{}) : null);
 	}
 
 	private function measure() : void{

@@ -10,18 +10,22 @@ use NpcLib\npc\Npc;
 use NpcLib\npc\PlayerNpc;
 use NpcLib\npc\ZombieNpc;
 use NpcLib\NpcManager;
+use NpcLib\PersistentNpcs;
 use NpcLibBench\Kind;
 use quark\entity\Living;
 use quark\entity\Location;
 use quark\entity\Skin;
 use quark\item\Item;
 use quark\world\World;
+use quark\plugin\Plugin;
 
 final class NpcLibPopulation extends SlotPopulation{
 	/** @var array<int, Npc> */
 	private array $npcs = [];
+	private int $registrationBytes = 0;
+	private int $registrationNs = 0;
 
-	public function __construct(private readonly NpcManager $manager, private readonly World $world, private readonly Skin $skin, private readonly bool $environmental = false){}
+	public function __construct(private NpcManager $manager, private readonly World $world, private readonly Skin $skin, private readonly bool $environmental = false, private ?PersistentNpcs $permanent = null){}
 
 	public function spawn(Kind $kind, Location $at) : int{
 		$npc = match($kind){
@@ -32,6 +36,12 @@ final class NpcLibPopulation extends SlotPopulation{
 		if($this->environmental){ $npc->setEnvironmental(true); }
 		$slot = $this->register($kind);
 		$this->npcs[$slot] = $npc;
+        if($this->permanent !== null){
+            $bytes = memory_get_usage(); $start = hrtime(true);
+            $this->permanent->remember('bench' . $slot, $npc);
+            $this->registrationNs += hrtime(true) - $start;
+            $this->registrationBytes += memory_get_usage() - $bytes;
+        }
 		return $slot;
 	}
 
@@ -74,6 +84,24 @@ final class NpcLibPopulation extends SlotPopulation{
 	public function onDamage(int $slot, Closure $callback) : void{
 		$this->npc($slot)->onDamage(static function() use ($callback) : void{ $callback(); });
 	}
+
+    /** @return array<string, int> */
+    public function profilePersistence(Plugin $owner) : array{
+        $store = $this->permanent ?? throw new LogicException('Persistence not enabled');
+        $slots = array_keys($this->npcs);
+        $start = hrtime(true); $store->save(); $saveNs = hrtime(true) - $start;
+        $this->manager->close(); $this->npcs = []; $this->permanent = null; unset($store);
+        gc_collect_cycles();
+        $this->manager = new NpcManager($owner);
+        $before = memory_get_usage(); $start = hrtime(true);
+        $this->permanent = $this->manager->enablePersistence(static function() : void{});
+        $loadNs = hrtime(true) - $start; $dormantBytes = memory_get_usage() - $before;
+        $start = hrtime(true); $this->permanent->restore(); $restoreNs = hrtime(true) - $start;
+        foreach($slots as $slot){ $this->npcs[$slot] = $this->permanent->get('bench' . $slot) ?? throw new LogicException('Missing restored benchmark NPC'); }
+        if($this->manager->count() !== count($slots)){ throw new LogicException('Duplicate restoration in benchmark'); }
+        return ['count' => count($slots), 'registration_ns' => $this->registrationNs, 'active_registration_heap_bytes' => $this->registrationBytes, 'checkpoint_ns' => $saveNs, 'load_ns' => $loadNs, 'dormant_store_heap_bytes' => $dormantBytes, 'restore_ns' => $restoreNs];
+    }
+    public function manager() : NpcManager{ return $this->manager; }
 
 	private function npc(int $slot) : Npc{ return $this->npcs[$slot] ?? throw new LogicException('Unknown slot ' . $slot); }
 }
