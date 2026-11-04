@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NpcLib\internal\entity;
+namespace NpcLib\entity;
 
 use Closure;
 

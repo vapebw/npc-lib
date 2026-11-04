@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NpcLib\internal\entity;
+namespace NpcLib\entity;
 
 use Closure;
 use LogicException;
@@ -41,8 +41,8 @@ trait EntityLifecycle{
 	public function getDrops() : array{ return []; }
 	public function getXpDropAmount() : int{ return 0; }
 
-	// static npcs sleep through random chunk ticks, quark wakes them itself on block changes and the lib on explicit changes
-	// environmental ones keep ticking like native entities, which also catches changes quark never announces
+	// static npcs sleep through random chunk ticks and wake on announced changes
+	// environmental ones keep ticking so silent block changes get noticed too
 	public function onRandomUpdate() : void{
 		if(!$this->stationary || $this->environmental){ parent::onRandomUpdate(); }
 	}
