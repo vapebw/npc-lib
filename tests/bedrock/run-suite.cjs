@@ -171,6 +171,11 @@ async function main() {
     s = await snapshot('20-kit-reconnect')
     check('kit-reconnect', lateOk(viewerState(offset, 'NpcProbeB')) && active(s).every(n => n.viewers.length === 2), { state: viewerState(offset, 'NpcProbeB') })
   })
+  await scenario('kit-static-sleep', async () => {
+    await sleep(2000)
+    s = await snapshot('21-kit-static-sleep')
+    check('kit-static-sleep', active(s).length === 3 && active(s).every(n => n.viewers.length === 2 && n.queued === false), { queued: active(s).map(n => n.queued) })
+  })
   await scenario('kit-reset', async () => {
     const offset = wire.length
     await command('kit reset'); await sleep(1200)

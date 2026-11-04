@@ -12,6 +12,7 @@ use RuntimeException;
 final class Main extends PluginBase{
 	private ?LifecycleSuite $lifecycle = null;
 	private ?FeatureSuite $features = null;
+	private ?EnvironmentSuite $environment = null;
 	private ?WireFixture $wire = null;
 
 	protected function onLoad() : void{
@@ -31,7 +32,9 @@ final class Main extends PluginBase{
 		$this->getLogger()->info('harness LOAD PASS');
 		if(getenv('NPCLIB_SUITE') === '1'){
 			$this->lifecycle = new LifecycleSuite($this, function() : void{
-				$this->features = new FeatureSuite($this, function() : void{ $this->getLogger()->info('feature suite done'); });
+				$this->features = new FeatureSuite($this, function() : void{
+					$this->environment = new EnvironmentSuite($this, function() : void{ $this->getLogger()->info('feature suite done'); });
+				});
 			});
 		}
 		if(getenv('NPCLIB_WIRE') === '1'){ $this->wire = new WireFixture($this); }
@@ -40,9 +43,11 @@ final class Main extends PluginBase{
 	protected function onDisable() : void{
 		$this->lifecycle?->finish();
 		$this->features?->finish();
+		$this->environment?->finish();
 		$this->wire?->finish();
 		$this->lifecycle = null;
 		$this->features = null;
+		$this->environment = null;
 		$this->wire = null;
 		$this->getLogger()->info('harness DISABLE PASS');
 	}
