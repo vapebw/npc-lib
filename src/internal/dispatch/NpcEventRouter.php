@@ -60,6 +60,6 @@ final class NpcEventRouter{
 
 	private function failed(Npc $npc, Throwable $error) : void{
 		$this->owner->getLogger()->logException($error);
-		$npc->close();
+		$this->manager->suspend($npc->getId());
 	}
 }

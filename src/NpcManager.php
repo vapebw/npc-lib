@@ -32,11 +32,19 @@ final class NpcManager{
 	private array $npcs = [];
 	private ?NpcEventRouter $router = null;
 	private ?Plugin $owner;
+	private ?PersistentNpcs $persistence = null;
 
 	public function __construct(Plugin $owner){
 		if(!$owner->isEnabled()){ throw new LogicException('NPC owner must be enabled'); }
 		$this->owner = $owner;
 		$this->router = new NpcEventRouter($this, $owner);
+	}
+
+	/** @param Closure(string, Npc): void $onRestore */
+	public function enablePersistence(Closure $onRestore) : PersistentNpcs{
+		$this->requireOwner();
+		if($this->persistence !== null){ throw new LogicException('Persistence already enabled'); }
+		return $this->persistence = new PersistentNpcs($this, $this->owner ?? throw new LogicException('NPC manager is closed'), $onRestore);
 	}
 
 	private function requireOwner() : void{
@@ -68,11 +76,20 @@ final class NpcManager{
 	/** @param class-string $class */
 	public function createMob(string $class, Location $location, string $name = '') : EntityNpc{
 		$this->requireOwner();
+		self::validateMobClass($class);
+		$entity = new $class($location);
+		return $this->spawn($entity, fn() => new EntityNpc($this, $entity), $name);
+	}
+
+	/**
+	 * @internal
+	 * @param class-string $class
+	 * @phpstan-assert class-string<Living&NpcEntity> $class
+	 */
+	public static function validateMobClass(string $class) : void{
 		if(!is_subclass_of($class, Living::class) || !is_subclass_of($class, NpcEntity::class) || !is_subclass_of($class, NeverSavedWithChunkEntity::class) || is_subclass_of($class, Human::class) || !(new ReflectionClass($class))->isInstantiable()){
 			throw new InvalidArgumentException('Mob class must be a concrete non-human Living entity implementing ' . NpcEntity::class . ' and ' . NeverSavedWithChunkEntity::class);
 		}
-		$entity = new $class($location);
-		return $this->spawn($entity, fn() => new EntityNpc($this, $entity), $name);
 	}
 
 	/**
@@ -102,29 +119,46 @@ final class NpcManager{
 	}
 
 	public function get(int $runtimeId) : ?Npc{ return $this->npcs[$runtimeId] ?? null; }
+
 	/** @return array<int, Npc> */
 	public function getAll() : array{ return $this->npcs; }
+
 	public function count() : int{ return count($this->npcs); }
+
 	public function isClosed() : bool{ return $this->owner === null; }
 
 	public function remove(int $runtimeId) : bool{
 		$npc = $this->npcs[$runtimeId] ?? null;
 		if($npc === null){ return false; }
+		$this->persistence?->removing($npc);
 		unset($this->npcs[$runtimeId]);
 		$npc->release(true);
 		return true;
 	}
 
 	/** @internal */
+	public function suspend(int $runtimeId) : void{
+		$npc = $this->npcs[$runtimeId] ?? null;
+		if($npc === null){ return; }
+		$this->persistence?->suspended($npc);
+		unset($this->npcs[$runtimeId]);
+		$npc->release(true);
+	}
+
+	/** @internal */
 	public function forget(int $runtimeId) : void{
 		$npc = $this->npcs[$runtimeId] ?? null;
+		if($npc !== null){ $this->persistence?->unloaded($npc); }
 		unset($this->npcs[$runtimeId]);
 		$npc?->release(false);
 	}
 
 	public function close() : void{
-		$this->owner = null;
 		$failure = null;
+		$persistence = $this->persistence;
+		$this->persistence = null;
+		try{ $persistence?->shutdown(); }catch(Throwable $error){ $failure = $error; }
+		$this->owner = null;
 		try{
 			while($this->npcs !== []){
 				try{ $this->remove(array_key_first($this->npcs)); }
