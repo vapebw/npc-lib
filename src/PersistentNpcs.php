@@ -58,7 +58,6 @@ final class PersistentNpcs{
 	public function rememberBatch(array $entries) : void{
 		$this->requireOpen();
 		if($entries === []){ return; }
-		$this->store->assertWritable();
 		/** @var array<string, array{Npc, string, State}> $staged */
 		$staged = [];
 		/** @var array<int, true> $seen */
@@ -68,7 +67,7 @@ final class PersistentNpcs{
 			$npc = $entry['npc'];
 			$customType = $entry['type'] ?? null;
 			if(
-				$this->store->taken($id) ||
+				$this->store->exists($id) ||
 				$this->store->registered($npc) ||
 				isset($seen[$npc->getId()]) ||
 				$this->manager->get($npc->getId()) !== $npc
@@ -121,6 +120,11 @@ final class PersistentNpcs{
 		return $this->store->ids();
 	}
 
+	public function has(string $id) : bool{
+		$this->requireOpen();
+		return $this->store->exists($id);
+	}
+
 	public function get(string $id) : ?Npc{
 		$this->requireOpen();
 		return $this->store->npc($id);
@@ -142,8 +146,10 @@ final class PersistentNpcs{
 		$this->store->save();
 	}
 
+	/** The only way back for a definition whose callback failed */
 	public function restore() : void{
 		$this->requireOpen();
+		$this->store->releaseQuarantine();
 		$this->restorer->restore($this->store->dormantIds(), true);
 	}
 
@@ -152,13 +158,15 @@ final class PersistentNpcs{
 		$id = $this->store->idOf($npc);
 		if($id === null){ return; }
 		$at = $npc->getLocation();
-		$chunk = DefinitionStore::chunkKey($at->getWorld()->getFolderName(), $at->getFloorX() >> 4, $at->getFloorZ() >> 4);
-		if(!$this->restorer->isUnloading($chunk)){
-			// closed outside a chunk unload (death, another plugin) so it's gone, not asleep
+		$world = $at->getWorld()->getFolderName();
+		$chunk = DefinitionStore::chunkKey($world, $at->getFloorX() >> 4, $at->getFloorZ() >> 4);
+		if($npc->getHealth() <= 0.0 || (!$this->restorer->isUnloading($chunk) && !$this->restorer->isWorldClosing($world))){
+			// dead, or closed outside an unload by another plugin, so it's gone and not asleep
 			$this->store->discard($id, $npc);
 			return;
 		}
-		$this->suspended($npc);
+		$this->restorer->observeClose($npc);
+		$this->store->suspend($id, $npc);
 	}
 
 	/** @internal */
@@ -167,6 +175,7 @@ final class PersistentNpcs{
 		if($id === null){ return; }
 		$this->restorer->observeClose($npc);
 		$this->store->suspend($id, $npc);
+		$this->store->quarantine($id);
 	}
 
 	/** @internal */
@@ -178,7 +187,8 @@ final class PersistentNpcs{
 	/** @internal */
 	public function shutdown() : void{
 		try{
-			$this->store->save();
+			// an NPC that can't be captured was logged and keeps its last good state
+			$this->store->checkpoint();
 		}finally{
 			$this->watcher->close();
 			$this->restorer->dispose();

@@ -23,10 +23,17 @@ final class DefinitionStore{
 	private array $dormantKeys = [];
 	/** @var array<string, array{Npc, string}> */
 	private array $active = [];
+	/**
+	 * Last good state of each active NPC, what gets written when it can't be captured
+	 * @var array<string, State>
+	 */
+	private array $snapshots = [];
 	/** @var array<int, string> */
 	private array $runtime = [];
+	/** @var array<string, true> */
+	private array $quarantined = [];
 	/** @var array<string, string> */
-	private array $failures = [];
+	private array $snapshotErrors = [];
 	/** @var array<string, int> */
 	private array $revisions = [];
 	private int $sequence = 0;
@@ -44,7 +51,7 @@ final class DefinitionStore{
 	public static function chunkKey(string $world, int $x, int $z) : string{ return $world . ':' . $x . ':' . $z; }
 
 	/** @return list<string> */
-	public function ids() : array{ return array_keys($this->dormant + $this->active + $this->failures); }
+	public function ids() : array{ return array_keys($this->dormant + $this->active); }
 
 	/** @return list<string> */
 	public function dormantIds() : array{ return array_keys($this->dormant); }
@@ -52,17 +59,13 @@ final class DefinitionStore{
 	/** @return list<string> */
 	public function dormantIdsIn(string $chunk) : array{ return array_keys($this->dormantChunks[$chunk] ?? []); }
 
-	public function exists(string $id) : bool{ return isset($this->dormant[$id]) || isset($this->active[$id]) || isset($this->failures[$id]); }
+	public function exists(string $id) : bool{ return isset($this->dormant[$id]) || isset($this->active[$id]); }
 
-	public function taken(string $id) : bool{ return isset($this->dormant[$id]) || isset($this->active[$id]); }
-
-	public function failed(string $id) : bool{ return isset($this->failures[$id]); }
+	public function isQuarantined(string $id) : bool{ return isset($this->quarantined[$id]); }
 
 	public function npc(string $id) : ?Npc{ return $this->active[$id][0] ?? null; }
 
 	public function idOf(Npc $npc) : ?string{ return $this->runtime[$npc->getId()] ?? null; }
-
-	public function typeOf(string $id) : string{ return $this->active[$id][1] ?? throw new RuntimeException('Missing active NPC ' . $id); }
 
 	public function registered(Npc $npc) : bool{ return isset($this->runtime[$npc->getId()]); }
 
@@ -85,14 +88,27 @@ final class DefinitionStore{
 		return $this->hasActiveIn($world, $x, $z) || isset($this->dormantChunks[self::chunkKey($world->getFolderName(), $x, $z)]);
 	}
 
-	public function assertWritable() : void{
-		if($this->failures === []){ return; }
-		throw new RuntimeException('NPC snapshot failure; original file preserved: ' . implode(', ', array_keys($this->failures)));
+	/**
+	 * Captures every active NPC and writes, one that can't be captured keeps its last good state
+	 * @return list<string> ids that kept an older state
+	 */
+	public function checkpoint() : array{
+		$stale = [];
+		foreach($this->active as $id => [$npc]){
+			// mid death animation: saving it would bring it back healthy
+			if(!$npc->isClosed() && $npc->getHealth() <= 0.0){
+				$this->forget($id, $npc);
+				continue;
+			}
+			if(!$this->refresh($id)){ $stale[] = $id; }
+		}
+		$this->write();
+		return $stale;
 	}
 
 	public function save() : void{
-		$this->assertWritable();
-		$this->write();
+		$stale = $this->checkpoint();
+		if($stale !== []){ throw new RuntimeException('NPC snapshot failure; kept last good state of: ' . implode(', ', $stale)); }
 	}
 
 	/** @param array<string, array{Npc, string, State}> $staged */
@@ -101,60 +117,59 @@ final class DefinitionStore{
 		foreach($staged as $id => [, , $state]){ $records[$id] = $state; }
 		// nothing changes in memory unless the file write works
 		$this->file->save($records);
-		foreach($staged as $id => [$npc, $type]){
+		foreach($staged as $id => [$npc, $type, $state]){
 			$this->active[$id] = [$npc, $type];
+			$this->snapshots[$id] = $state;
 			$this->runtime[$npc->getId()] = $id;
 			$this->revisions[$id] = ++$this->sequence;
+			unset($this->quarantined[$id]);
 		}
 	}
 
 	public function remove(string $id) : ?Npc{
+		$records = $this->records();
+		unset($records[$id]);
+		// explicit deletions stay durable, a failure leaves the definition with its owner
+		$this->file->save($records);
 		$active = $this->active[$id] ?? null;
-		$state = $this->dormant[$id] ?? null;
-		$failure = $this->failures[$id] ?? null;
-		$revision = $this->revisions[$id] ?? null;
-		unset($this->active[$id], $this->failures[$id], $this->revisions[$id]);
+		unset($this->active[$id], $this->snapshots[$id], $this->revisions[$id], $this->quarantined[$id], $this->snapshotErrors[$id]);
 		$this->dropDormant($id);
-		try{
-			$this->write(true);
-		}catch(Throwable $error){
-			if($active !== null){ $this->active[$id] = $active; }
-			if($state !== null){ $this->putDormant($id, $state); }
-			if($failure !== null){ $this->failures[$id] = $failure; }
-			if($revision !== null){ $this->revisions[$id] = $revision; }
-			throw $error;
-		}
 		if($active === null){ return null; }
 		unset($this->runtime[$active[0]->getId()]);
 		return $active[0];
 	}
 
 	public function wake(string $id, Npc $npc, string $type) : void{
+		$state = $this->dormant[$id] ?? throw new RuntimeException('Missing dormant NPC ' . $id);
 		$this->dropDormant($id);
 		$this->active[$id] = [$npc, $type];
+		$this->snapshots[$id] = $state;
 		$this->runtime[$npc->getId()] = $id;
 	}
 
 	/** @param State $state */
 	public function park(string $id, Npc $npc, array $state) : void{
-		unset($this->active[$id], $this->runtime[$npc->getId()]);
+		unset($this->active[$id], $this->snapshots[$id], $this->runtime[$npc->getId()], $this->snapshotErrors[$id]);
+		$this->putDormant($id, $state);
+		$this->quarantined[$id] = true;
+	}
+
+	public function quarantine(string $id) : void{ $this->quarantined[$id] = true; }
+
+	public function releaseQuarantine() : void{ $this->quarantined = []; }
+
+	public function suspend(string $id, Npc $npc) : void{
+		// native close can't take an exception from us, refresh only logs
+		$this->refresh($id);
+		$state = $this->snapshots[$id] ?? throw new RuntimeException('Missing NPC snapshot ' . $id);
+		unset($this->active[$id], $this->snapshots[$id], $this->runtime[$npc->getId()], $this->snapshotErrors[$id]);
 		$this->putDormant($id, $state);
 	}
 
-	public function suspend(string $id, Npc $npc) : void{
-		try{
-			$this->putDormant($id, StateCodec::capture($npc, $this->typeOf($id)));
-		}catch(Throwable $error){
-			$this->failures[$id] = $error->getMessage();
-			// native close can't take an exception from us and a later save must not erase the last good file
-			$this->logger?->error('NPC snapshot failed for ' . $id . '; original file preserved: ' . $error->getMessage());
-		}finally{ unset($this->active[$id], $this->runtime[$npc->getId()]); }
-	}
-
 	public function discard(string $id, Npc $npc) : void{
-		unset($this->active[$id], $this->runtime[$npc->getId()], $this->revisions[$id], $this->failures[$id]);
+		$this->forget($id, $npc);
 		try{
-			$this->write(true);
+			$this->write();
 		}catch(Throwable $error){
 			$this->logger?->error('NPC definition ' . $id . ' could not be removed after its entity closed: ' . $error->getMessage());
 		}
@@ -162,26 +177,37 @@ final class DefinitionStore{
 
 	public function dispose() : void{
 		$this->closed = true;
-		$this->active = []; $this->runtime = []; $this->dormant = []; $this->dormantChunks = []; $this->dormantKeys = [];
-		$this->failures = []; $this->revisions = []; $this->logger = null;
+		$this->logger = null;
+		$this->active = []; $this->snapshots = []; $this->runtime = []; $this->dormant = []; $this->dormantChunks = []; $this->dormantKeys = [];
+		$this->quarantined = []; $this->snapshotErrors = []; $this->revisions = [];
 		$this->file->close();
 	}
 
-	/** @return array<string, State> */
-	private function records(bool $keepFailed = false) : array{
-		$records = $this->dormant;
-		if($keepFailed && $this->failures !== []){
-			$committed = $this->file->load();
-			foreach($this->failures as $id => $_){
-				$records[$id] = $committed[$id] ?? throw new RuntimeException('Missing committed NPC snapshot for ' . $id);
-			}
-		}
-		foreach($this->active as $id => [$npc, $type]){ $records[$id] = StateCodec::capture($npc, $type); }
-		return $records;
+	private function forget(string $id, Npc $npc) : void{
+		unset($this->active[$id], $this->snapshots[$id], $this->runtime[$npc->getId()], $this->revisions[$id], $this->quarantined[$id], $this->snapshotErrors[$id]);
 	}
 
-	private function write(bool $keepFailed = false) : void{
-		$this->file->save($this->records($keepFailed));
+	/** @return array<string, State> */
+	private function records() : array{ return $this->dormant + $this->snapshots; }
+
+	private function write() : void{
+		$this->file->save($this->records());
+	}
+
+	private function refresh(string $id) : bool{
+		$entry = $this->active[$id] ?? throw new RuntimeException('Missing active NPC ' . $id);
+		try{
+			$this->snapshots[$id] = StateCodec::capture($entry[0], $entry[1]);
+			unset($this->snapshotErrors[$id]);
+			return true;
+		}catch(Throwable $error){
+			$message = $error->getMessage();
+			if(($this->snapshotErrors[$id] ?? null) !== $message){
+				$this->snapshotErrors[$id] = $message;
+				$this->logger?->error('NPC snapshot failed for ' . $id . '; keeping its last good state: ' . $message);
+			}
+			return false;
+		}
 	}
 
 	/** @param State $state */

@@ -72,7 +72,8 @@ final class StateCodec{
 		return self::validate([
 			'type' => $type,
 			'world' => $location->getWorld()->getFolderName(),
-			'position' => [$location->x, $location->y, $location->z, $location->yaw, $location->pitch],
+			// teleport keeps any yaw, the file only takes one turn
+			'position' => [$location->x, $location->y, $location->z, abs($location->yaw) > 360.0 ? fmod($location->yaw, 360.0) : $location->yaw, $location->pitch],
 			'name' => $npc->getName(),
 			'score' => $npc->getScoreTag() ?? '',
 			'scale' => $npc->getScale(),

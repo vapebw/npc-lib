@@ -28,6 +28,8 @@ final class Restorer{
 	private array $closing = [];
 	/** @var array<string, true> */
 	private array $unloading = [];
+	/** @var array<string, true> */
+	private array $closingWorlds = [];
 	private bool $running = false;
 	/** @var TaskHandler<ClosureTask>|null */
 	private ?TaskHandler $retry = null;
@@ -65,6 +67,16 @@ final class Restorer{
 		$this->defer();
 	}
 
+	public function isWorldClosing(string $world) : bool{ return isset($this->closingWorlds[$world]); }
+
+	// quark also closes entities outside any chunk event while a world unloads
+	public function worldClosing(string $world) : void{
+		$this->closingWorlds[$world] = true;
+		$this->defer();
+	}
+
+	public function worldOpened(string $world) : void{ unset($this->closingWorlds[$world]); }
+
 	public function chunkLoaded(string $chunk) : void{
 		unset($this->unloading[$chunk]);
 		$this->restore($this->store->dormantIdsIn($chunk), false);
@@ -84,28 +96,30 @@ final class Restorer{
 			return;
 		}
 		$this->running = true;
+		$failure = null;
 		try{
 			foreach($ids as $id){
 				if($this->store->isClosed()){ break; }
-				// runs inside quark's loader so one bad one can't starve the rest
+				// one bad definition can't starve the rest, restore() reports the first error at the end
 				try{ $this->restoreOne($id); }
 				catch(Throwable $error){
-					if($strict){ throw $error; }
-					$this->logger?->logException($error);
+					if($strict){ $failure ??= $error; }
+					else{ $this->logger?->logException($error); }
 				}
 			}
 		}finally{ $this->running = false; }
+		if($failure !== null){ throw $failure; }
 	}
 
 	public function dispose() : void{
 		$this->mobs = []; $this->onRestore = null; $this->logger = null;
 		$this->retry?->cancel(); $this->retry = null; $this->scheduler = null;
-		$this->closing = []; $this->unloading = [];
+		$this->closing = []; $this->unloading = []; $this->closingWorlds = [];
 	}
 
 	private function restoreOne(string $id) : void{
 		$state = $this->store->state($id);
-		if($state === null || $this->store->failed($id) || !$this->knows($state['type'])){ return; }
+		if($state === null || $this->store->isQuarantined($id) || !$this->knows($state['type'])){ return; }
 		$revision = $this->store->revision($id);
 		$p = $state['position'];
 		$x = ((int) floor($p[0])) >> 4;
@@ -114,7 +128,12 @@ final class Restorer{
 		$world = Server::getInstance()->getWorldManager()->getWorldByName($state['world']);
 		if($world === null || !$world->isChunkLoaded($x, $z)){ return; }
 		$location = new Location($p[0], $p[1], $p[2], $world, $p[3], $p[4]);
-		$npc = StateCodec::spawn($this->manager, $location, $state, $this->mobClass($state['type']));
+		try{ $npc = StateCodec::spawn($this->manager, $location, $state, $this->mobClass($state['type'])); }
+		catch(Throwable $error){
+			// waits for an explicit restore() instead of failing again on every chunk event
+			if(!$this->store->isClosed() && $this->store->revision($id) === $revision){ $this->store->quarantine($id); }
+			throw $error;
+		}
 		// native spawn hooks can delete or replace this definition
 		if($this->manager->isClosed() || $this->store->revision($id) !== $revision){
 			$npc->close();
@@ -140,6 +159,7 @@ final class Restorer{
 			$this->retry = null;
 			if(!$this->store->isClosed()){
 				$this->unloading = [];
+				$this->closingWorlds = [];
 				$this->restore($this->store->dormantIds(), false);
 			}
 		}), 1);

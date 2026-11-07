@@ -27,7 +27,10 @@ final class NpcEventRouter{
 		$events = Server::getInstance()->getPluginManager();
 		try{
 			$this->listeners[] = $events->registerEvent(PluginDisableEvent::class, function(PluginDisableEvent $event) : void{
-				if($event->getPlugin() === $this->owner){ $this->manager->close(); }
+				if($event->getPlugin() !== $this->owner){ return; }
+				// an exception here would abort the server's own shutdown
+				try{ $this->manager->close(); }
+				catch(Throwable $error){ $this->owner->getLogger()->logException($error); }
 			}, EventPriority::LOWEST, $owner);
 			$this->listeners[] = $events->registerEvent(EntityDespawnEvent::class, function(EntityDespawnEvent $event) : void{
 				$this->manager->forget($event->getEntity()->getId());

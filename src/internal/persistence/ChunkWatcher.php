@@ -34,13 +34,15 @@ final class ChunkWatcher{
 				$this->chunkLoaded($event);
 			}, EventPriority::MONITOR, $owner);
 			$this->listeners[] = $events->registerEvent(WorldLoadEvent::class, function(WorldLoadEvent $event) : void{
-				$this->worldLoaded();
+				$this->worldLoaded($event);
+			}, EventPriority::MONITOR, $owner);
+			$this->listeners[] = $events->registerEvent(WorldUnloadEvent::class, function(WorldUnloadEvent $event) : void{
+				if($this->store->isClosed()){ return; }
+				$this->saveFor($event->getWorld());
+				$this->restorer->worldClosing($event->getWorld()->getFolderName());
 			}, EventPriority::MONITOR, $owner);
 			$this->listeners[] = $events->registerEvent(ChunkUnloadEvent::class, function(ChunkUnloadEvent $event) : void{
 				$this->chunkUnloading($event);
-			}, EventPriority::HIGHEST, $owner);
-			$this->listeners[] = $events->registerEvent(WorldUnloadEvent::class, function(WorldUnloadEvent $event) : void{
-				if(!$this->saveFor($event->getWorld())){ $event->cancel(); }
 			}, EventPriority::HIGHEST, $owner);
 		}catch(Throwable $error){
 			$this->close();
@@ -59,8 +61,9 @@ final class ChunkWatcher{
 		$this->restorer->chunkLoaded(DefinitionStore::chunkKey($event->getWorld()->getFolderName(), $event->getChunkX(), $event->getChunkZ()));
 	}
 
-	private function worldLoaded() : void{
+	private function worldLoaded(WorldLoadEvent $event) : void{
 		if($this->store->isClosed()){ return; }
+		$this->restorer->worldOpened($event->getWorld()->getFolderName());
 		$this->restorer->restore($this->store->dormantIds(), false);
 	}
 
@@ -69,21 +72,17 @@ final class ChunkWatcher{
 		$x = $event->getChunkX();
 		$z = $event->getChunkZ();
 		if($this->store->isClosed() || !$this->store->hasDefinitionIn($world, $x, $z)){ return; }
-		if(!$this->saveFor($world, $x, $z)){
-			$event->cancel();
-			return;
-		}
+		$this->saveFor($world, $x, $z);
 		$this->restorer->chunkClosing(DefinitionStore::chunkKey($world->getFolderName(), $x, $z));
 	}
 
-	private function saveFor(World $world, ?int $x = null, ?int $z = null) : bool{
-		if(!$this->store->hasActiveIn($world, $x, $z)){ return true; }
+	// a failed save is logged, it never holds an unload back
+	private function saveFor(World $world, ?int $x = null, ?int $z = null) : void{
+		if(!$this->store->hasActiveIn($world, $x, $z)){ return; }
 		try{
-			$this->store->save();
-			return true;
+			$this->store->checkpoint();
 		}catch(Throwable $error){
-			$this->logger?->error('NPC unload save failed; unload cancelled and original file preserved: ' . $error->getMessage());
-			return false;
+			$this->logger?->error('NPC unload save failed: ' . $error->getMessage());
 		}
 	}
 }
