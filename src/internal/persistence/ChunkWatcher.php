@@ -58,7 +58,7 @@ final class ChunkWatcher{
 	private function worldLoaded(WorldLoadEvent $event) : void{
 		if($this->store->isClosed()){ return; }
 		$this->restorer->worldOpened($event->getWorld()->getFolderName());
-		$this->restorer->restore($this->store->dormantIds(), false);
+		$this->restorer->enqueue($this->store->dormantIds());
 	}
 
 	// no write here: each entity is captured as it closes and the file is written once next tick

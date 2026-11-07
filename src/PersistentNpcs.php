@@ -132,13 +132,34 @@ final class PersistentNpcs{
 
 	public function delete(string $id) : bool{
 		$this->requireOpen();
-		if(!$this->store->exists($id)){ return false; }
-		$active = $this->store->remove($id);
-		if($active !== null){
-			$this->restorer->observeClose($active);
-			$active->close();
+		return $this->store->exists($id) && $this->deleteBatch([$id]) === 1;
+	}
+
+	/**
+	 * Removes every id with one durable write, unknown ids are skipped. Nothing changes if the write fails.
+	 * @param list<string> $ids
+	 * @return int definitions removed
+	 */
+	public function deleteBatch(array $ids) : int{
+		$this->requireOpen();
+		/** @var array<string, true> $known */
+		$known = [];
+		foreach($ids as $id){
+			$id = DefinitionFile::validateId($id);
+			if($this->store->exists($id)){ $known[$id] = true; }
 		}
-		return true;
+		if($known === []){ return 0; }
+		$failure = null;
+		foreach($this->store->remove(array_keys($known)) as $npc){
+			try{
+				$this->restorer->observeClose($npc);
+				$npc->close();
+			}catch(Throwable $error){
+				$failure ??= $error;
+			}
+		}
+		if($failure !== null){ throw $failure; }
+		return count($known);
 	}
 
 	public function save() : void{
@@ -150,7 +171,26 @@ final class PersistentNpcs{
 	public function restore() : void{
 		$this->requireOpen();
 		$this->store->releaseQuarantine();
-		$this->restorer->restore($this->store->dormantIds(), true);
+		$this->restorer->restoreNow($this->store->dormantIds());
+	}
+
+	/** Like restore() but spread over ticks, failures are logged instead of thrown */
+	public function restoreGradually() : void{
+		$this->requireOpen();
+		$this->store->releaseQuarantine();
+		$this->restorer->enqueue($this->store->dormantIds());
+	}
+
+	/** @return int definitions still waiting for budget */
+	public function pendingRestores() : int{
+		$this->requireOpen();
+		return $this->restorer->pending();
+	}
+
+	/** Limits gradual and chunk load restoration in one tick, restore() ignores it */
+	public function setRestoreBudget(int $maxNpcsPerTick, float $maxMillisPerTick) : void{
+		$this->requireOpen();
+		$this->restorer->setBudget($maxNpcsPerTick, $maxMillisPerTick);
 	}
 
 	/** @internal */

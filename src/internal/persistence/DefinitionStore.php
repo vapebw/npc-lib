@@ -145,18 +145,27 @@ final class DefinitionStore{
 		}
 	}
 
-	public function remove(string $id) : ?Npc{
+	/**
+	 * Explicit deletions stay durable: a failure throws and changes nothing
+	 * @param list<string> $ids
+	 * @return list<Npc> active NPCs of those definitions, for the caller to close
+	 */
+	public function remove(array $ids) : array{
 		$records = $this->records();
-		unset($records[$id]);
-		// explicit deletions stay durable, a failure leaves the definition with its owner
+		foreach($ids as $id){ unset($records[$id]); }
 		$this->file->save($records);
 		$this->dirty = false;
-		$active = $this->active[$id] ?? null;
-		unset($this->active[$id], $this->snapshots[$id], $this->revisions[$id], $this->quarantined[$id], $this->snapshotErrors[$id]);
-		$this->dropDormant($id);
-		if($active === null){ return null; }
-		unset($this->runtime[$active[0]->getId()]);
-		return $active[0];
+		$npcs = [];
+		foreach($ids as $id){
+			$active = $this->active[$id] ?? null;
+			unset($this->active[$id], $this->snapshots[$id], $this->revisions[$id], $this->quarantined[$id], $this->snapshotErrors[$id]);
+			$this->dropDormant($id);
+			if($active !== null){
+				unset($this->runtime[$active[0]->getId()]);
+				$npcs[] = $active[0];
+			}
+		}
+		return $npcs;
 	}
 
 	public function wake(string $id, Npc $npc, string $type) : void{

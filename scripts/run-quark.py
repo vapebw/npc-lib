@@ -113,7 +113,7 @@ if args.suite:
     (run / "persistence.json").write_text(json.dumps(persistence, indent=2) + "\n", encoding="utf8")
     checks["persistence_suite"] = persistence["result"] == "PASS"
     checks["expected_snapshot_failure"] = len(expected_snapshot_errors) == 4 and "invalid state does not block the unload or native cleanup" in persistence.get("passed", [])
-    checks["expected_callback_failure"] = len(expected_callback_errors) == 3 and "definition kept after a callback failure restores later" in persistence.get("passed", []) and "failed definition in a chunk load stays dormant without blocking the rest" in persistence.get("passed", [])
+    checks["expected_callback_failure"] = len(expected_callback_errors) == 5 and "definition kept after a callback failure restores later" in persistence.get("passed", []) and "failed definition in a chunk load stays dormant without blocking the rest" in persistence.get("passed", [])
 summary = {"quark": sha, "exit": code, "checks": checks, "result": "PASS" if all(checks.values()) else "FAIL"}
 (run / "result.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf8")
 print(json.dumps(summary, indent=2), flush=True)

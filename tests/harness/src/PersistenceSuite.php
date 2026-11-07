@@ -57,6 +57,7 @@ final class PersistenceSuite{
 				$npc->onDamage(static function() : void{});
 			};
 			$store = $manager->enablePersistence($attach);
+			$store->setRestoreBudget(100000, 100000.0);
 			$unready = $manager->createVillager(new Location(16000, 16, 16000, $world, 0, 0), 'Not ready');
 			try{ $store->remember('unready', $unready); throw new RuntimeException('Unloaded registration accepted'); }
 			catch(LogicException){
@@ -390,6 +391,7 @@ final class PersistenceSuite{
 			$manager->close();
 			$manager = new NpcManager($plugin);
 			$store = $manager->enablePersistence(static function(string $id) : void{ if($id === 'brokenFirst'){ throw new RuntimeException('chunk restore sentinel'); } });
+			$store->setRestoreBudget(100000, 100000.0);
 			$world->unloadChunk(0, 0, false);
 			$escaped = false;
 			try{ $world->loadChunk(0, 0); }
@@ -402,6 +404,7 @@ final class PersistenceSuite{
 			$manager->close();
 			$manager = new NpcManager($plugin);
 			$store = $manager->enablePersistence($attach);
+			$store->setRestoreBudget(100000, 100000.0);
 			$invalid = $manager->createVillager(new Location(8, 16, 8, $world, 0, 0), 'Good first');
 			$store->remember('invalidState', $invalid);
 			$secondInvalid = $manager->createVillager(new Location(8, 16, 8, $world, 0, 0), 'Good second');
@@ -543,6 +546,7 @@ final class PersistenceSuite{
 			$file = $plugin->getDataFolder() . 'npcs.json';
 			$world->loadChunk(0, 0); $world->loadChunk(1, 0);
 			$store = $manager->enablePersistence(static function() : void{});
+			$store->setRestoreBudget(100000, 100000.0);
 			$fragile = $manager->createVillager(new Location(8, 16, 8, $world, 0, 0), 'Fragile');
 			$other = $manager->createVillager(new Location(24, 16, 8, $world, 0, 0), 'Other');
 			$store->rememberBatch(['fragile' => ['npc' => $fragile], 'other' => ['npc' => $other]]);
@@ -565,9 +569,101 @@ final class PersistenceSuite{
 					$this->sharedSkins($plugin, $world, $file);
 				}catch(Throwable $error){ $failure = $error::class . ': ' . $error->getMessage(); }
 				finally{ if(!$manager->isClosed()){ $manager->close(); } }
-				$report($failure);
+				if($failure !== null){ $report($failure); }
+				else{ $this->gradualRestore($plugin, $report); }
 			}), 3);
 		}catch(Throwable $error){ $manager->close(); $report($error::class . ': ' . $error->getMessage()); }
+	}
+
+	/** @param Closure(?string): void $report */
+	private function gradualRestore(PluginBase $plugin, Closure $report) : void{
+		$manager = new NpcManager($plugin);
+		try{
+			$world = $plugin->getServer()->getWorldManager()->getDefaultWorld() ?? throw new RuntimeException('Missing world');
+			$world->loadChunk(0, 0); $world->loadChunk(1, 0);
+			$store = $manager->enablePersistence(static function() : void{});
+			$entries = [];
+			for($i = 0; $i < 30; ++$i){ $entries['queued' . $i] = ['npc' => $manager->createVillager(new Location(8, 16, 8, $world, 0, 0), 'Queued')]; }
+			$entries['elsewhere'] = ['npc' => $manager->createVillager(new Location(24, 16, 8, $world, 0, 0), 'Elsewhere')];
+			$store->rememberBatch($entries);
+			$manager->close();
+			$world->unloadChunk(1, 0, false);
+			$manager = new NpcManager($plugin);
+			$store = $manager->enablePersistence(static function(string $id) : void{ if($id === 'queued3'){ throw new RuntimeException('chunk restore sentinel'); } });
+			$store->setRestoreBudget(5, 1000.0);
+			$store->restoreGradually();
+			$this->check($manager->count() <= 5 && $store->pendingRestores() > 0, 'gradual restore respects the npc budget in its first tick');
+			$this->check(!$world->isChunkLoaded(1, 0), 'gradual restore does not force chunk loading');
+			$store->deleteBatch(['queued25', 'queued26']);
+			$plugin->getScheduler()->scheduleDelayedTask(new ClosureTask(function() use ($plugin, $manager, $store, $world, $report) : void{
+				$failure = null;
+				try{
+					$this->check($manager->count() < 28 && $store->pendingRestores() > 0, 'gradual restore spreads over several ticks');
+				}catch(Throwable $error){ $failure = $error::class . ': ' . $error->getMessage(); }
+				if($failure !== null){ $manager->close(); $report($failure); return; }
+				$plugin->getScheduler()->scheduleDelayedTask(new ClosureTask(function() use ($plugin, $manager, $store, $world, $report) : void{
+					$failure = null;
+					try{
+						$this->check(
+							$store->pendingRestores() === 0 && $manager->count() === 27 && $store->get('queued3') === null && $store->has('queued3') && $store->get('elsewhere') === null,
+							'a failed callback and a deleted definition do not stop the rest, nothing is duplicated'
+						);
+						$world->loadChunk(1, 0);
+						$this->check($store->get('elsewhere') !== null, 'a definition in an unloaded chunk comes back when its chunk loads');
+						$world->unloadChunk(1, 0, false);
+						$store->restoreGradually();
+						$pending = $store->pendingRestores();
+						$manager->close();
+						$this->check($manager->isClosed() && $manager->count() === 0, 'closing during a gradual restore cancels it (' . $pending . ' waiting)');
+						$this->deleteBatch($plugin, $world);
+					}catch(Throwable $error){ $failure = $error::class . ': ' . $error->getMessage(); }
+					finally{ if(!$manager->isClosed()){ $manager->close(); } }
+					$report($failure);
+				}), 8);
+			}), 2);
+		}catch(Throwable $error){ $manager->close(); $report($error::class . ': ' . $error->getMessage()); }
+	}
+
+	private function deleteBatch(PluginBase $plugin, World $world) : void{
+		$file = $plugin->getDataFolder() . 'npcs.json';
+		$manager = new NpcManager($plugin);
+		try{
+			$store = $manager->enablePersistence(static function() : void{});
+			$store->deleteBatch($store->ids());
+			$world->loadChunk(0, 0); $world->loadChunk(1, 0);
+			$npcs = [];
+			$entries = [];
+			for($i = 0; $i < 20; ++$i){
+				$npcs[$i] = $manager->createVillager(new Location(8, 16, 8, $world, 0, 0));
+				$entries['bulk' . $i] = ['npc' => $npcs[$i]];
+			}
+			$store->rememberBatch($entries);
+			$ids = array_keys($entries);
+			rename($file, $file . '.backup'); mkdir($file);
+			try{
+				try{ $store->deleteBatch($ids); throw new RuntimeException('Batch delete failure hidden'); }
+				catch(Throwable $e){
+					$this->check($e->getMessage() !== 'Batch delete failure hidden' && count($store->ids()) === 20 && !$npcs[0]->isClosed() && $store->get('bulk0') === $npcs[0], 'failed batch delete changes nothing');
+				}
+			}finally{ rmdir($file); rename($file . '.backup', $file); }
+			try{ $store->deleteBatch(['bulk0', 'not valid']); throw new RuntimeException('Invalid id accepted'); }
+			catch(UnexpectedValueException){ $this->check(count($store->ids()) === 20, 'batch delete validates every id before touching anything'); }
+			// a despawn hook that deletes another npc of the batch while it is being closed
+			$hook = $plugin->getServer()->getPluginManager()->registerEvent(EntityDespawnEvent::class, function(EntityDespawnEvent $event) use ($store, $npcs) : void{
+				if($event->getEntity()->getId() === $npcs[1]->getId()){ $store->delete('bulk2'); }
+			}, EventPriority::NORMAL, $plugin);
+			$npcs[5]->close();
+			$before = $store->writes();
+			try{ $removed = $store->deleteBatch([...$ids, 'bulk3', 'unknown']); }
+			finally{ HandlerListManager::global()->unregisterAll($hook); }
+			$this->check($removed === 19 && $store->writes() === $before + 1, 'batch delete is one write, skips unknown and duplicate ids');
+			$this->check($store->ids() === [] && $manager->count() === 0 && $npcs[0]->isClosed() && $npcs[19]->isClosed(), 'batch delete closes every npc after the commit');
+			$manager->close();
+			$manager = new NpcManager($plugin);
+			$store = $manager->enablePersistence(static function() : void{});
+			$store->restore();
+			$this->check($store->ids() === [] && $manager->count() === 0, 'batch deleted definitions never come back');
+		}finally{ $manager->close(); }
 	}
 
 	private function sharedSkins(PluginBase $plugin, World $world, string $file) : void{
