@@ -81,7 +81,7 @@ except subprocess.TimeoutExpired:
     code = process.wait()
 reader.join()
 output = "".join(lines)
-expected_snapshot_errors = [line for line in lines if any(f"NPC snapshot failed for {id}; keeping its last good state: Invalid or oversized NPC string" in line for id in ("guide", "invalidState", "secondInvalidState"))]
+expected_snapshot_errors = [line for line in lines if any(f"NPC snapshot failed for {id}; keeping its last good state: Invalid or oversized NPC string" in line for id in ("guide", "invalidState", "secondInvalidState", "other"))]
 expected_callback_errors = [line for index, line in enumerate(lines[:-1]) if "Unhandled exception" in line and any(token in lines[index + 1] for token in ("runtime callback sentinel", "chunk restore sentinel"))]
 error_output = "".join(line for line in lines if line not in expected_snapshot_errors and line not in expected_callback_errors)
 checks = {
@@ -112,7 +112,7 @@ if args.suite:
     persistence = json.loads(persistence_file.read_text(encoding="utf8")) if persistence_file.exists() else {"result": "MISSING"}
     (run / "persistence.json").write_text(json.dumps(persistence, indent=2) + "\n", encoding="utf8")
     checks["persistence_suite"] = persistence["result"] == "PASS"
-    checks["expected_snapshot_failure"] = len(expected_snapshot_errors) == 3 and "invalid state does not block the unload or native cleanup" in persistence.get("passed", [])
+    checks["expected_snapshot_failure"] = len(expected_snapshot_errors) == 4 and "invalid state does not block the unload or native cleanup" in persistence.get("passed", [])
     checks["expected_callback_failure"] = len(expected_callback_errors) == 3 and "definition kept after a callback failure restores later" in persistence.get("passed", []) and "failed definition in a chunk load stays dormant without blocking the rest" in persistence.get("passed", [])
 summary = {"quark": sha, "exit": code, "checks": checks, "result": "PASS" if all(checks.values()) else "FAIL"}
 (run / "result.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf8")

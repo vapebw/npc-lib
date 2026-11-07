@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace NpcLib\internal\persistence;
 
-use AttachableLogger;
 use quark\event\EventPriority;
 use quark\event\HandlerListManager;
 use quark\event\RegisteredListener;
@@ -14,7 +13,6 @@ use quark\event\world\WorldLoadEvent;
 use quark\event\world\WorldUnloadEvent;
 use quark\plugin\Plugin;
 use quark\Server;
-use quark\world\World;
 use Throwable;
 
 /** @internal */
@@ -25,8 +23,7 @@ final class ChunkWatcher{
 	public function __construct(
 		Plugin $owner,
 		private readonly DefinitionStore $store,
-		private readonly Restorer $restorer,
-		private ?AttachableLogger $logger
+		private readonly Restorer $restorer
 	){
 		$events = Server::getInstance()->getPluginManager();
 		try{
@@ -37,9 +34,7 @@ final class ChunkWatcher{
 				$this->worldLoaded($event);
 			}, EventPriority::MONITOR, $owner);
 			$this->listeners[] = $events->registerEvent(WorldUnloadEvent::class, function(WorldUnloadEvent $event) : void{
-				if($this->store->isClosed()){ return; }
-				$this->saveFor($event->getWorld());
-				$this->restorer->worldClosing($event->getWorld()->getFolderName());
+				if(!$this->store->isClosed()){ $this->restorer->worldClosing($event->getWorld()->getFolderName()); }
 			}, EventPriority::MONITOR, $owner);
 			$this->listeners[] = $events->registerEvent(ChunkUnloadEvent::class, function(ChunkUnloadEvent $event) : void{
 				$this->chunkUnloading($event);
@@ -53,7 +48,6 @@ final class ChunkWatcher{
 	public function close() : void{
 		foreach($this->listeners as $listener){ HandlerListManager::global()->unregisterAll($listener); }
 		$this->listeners = [];
-		$this->logger = null;
 	}
 
 	private function chunkLoaded(ChunkLoadEvent $event) : void{
@@ -67,22 +61,12 @@ final class ChunkWatcher{
 		$this->restorer->restore($this->store->dormantIds(), false);
 	}
 
+	// no write here: each entity is captured as it closes and the file is written once next tick
 	private function chunkUnloading(ChunkUnloadEvent $event) : void{
 		$world = $event->getWorld();
 		$x = $event->getChunkX();
 		$z = $event->getChunkZ();
 		if($this->store->isClosed() || !$this->store->hasDefinitionIn($world, $x, $z)){ return; }
-		$this->saveFor($world, $x, $z);
 		$this->restorer->chunkClosing(DefinitionStore::chunkKey($world->getFolderName(), $x, $z));
-	}
-
-	// a failed save is logged, it never holds an unload back
-	private function saveFor(World $world, ?int $x = null, ?int $z = null) : void{
-		if(!$this->store->hasActiveIn($world, $x, $z)){ return; }
-		try{
-			$this->store->checkpoint();
-		}catch(Throwable $error){
-			$this->logger?->error('NPC unload save failed: ' . $error->getMessage());
-		}
 	}
 }

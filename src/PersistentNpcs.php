@@ -32,9 +32,9 @@ final class PersistentNpcs{
 	public function __construct(private readonly NpcManager $manager, Plugin $owner, Closure $onRestore){
 		$file = new DefinitionFile($owner->getDataFolder(), $owner->getName());
 		try{
-			$store = new DefinitionStore($file, $owner->getLogger());
+			$store = new DefinitionStore($file, $owner->getLogger(), $owner->getScheduler());
 			$restorer = new Restorer($manager, $store, $owner->getScheduler(), $owner->getLogger(), $onRestore);
-			$watcher = new ChunkWatcher($owner, $store, $restorer, $owner->getLogger());
+			$watcher = new ChunkWatcher($owner, $store, $restorer);
 		}catch(Throwable $error){
 			$file->close();
 			throw $error;
@@ -195,6 +195,12 @@ final class PersistentNpcs{
 			$this->store->dispose();
 		}
 	}
+
+	/**
+	 * @internal
+	 * @return int times the file was written since this object was created
+	 */
+	public function writes() : int{ return $this->store->writes(); }
 
 	private function requireOpen() : void{
 		if($this->store->isClosed() || $this->manager->isClosed()){ throw new LogicException('Persistent NPC context is closed'); }

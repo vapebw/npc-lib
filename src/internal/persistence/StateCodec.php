@@ -18,6 +18,8 @@ use quark\item\Item;
 use quark\item\VanillaItems;
 use Throwable;
 use UnexpectedValueException;
+use WeakMap;
+use WeakReference;
 
 /**
  * @internal
@@ -38,10 +40,13 @@ use UnexpectedValueException;
  */
 final class StateCodec{
 	private const int MAX_TEXT = 4096;
-	private const int MAX_BLOB = 262144;
+	private const int MAX_BLOB = 4194304;
 	private const int MAX_ITEM = 131072;
 	private const int MAX_COORDINATE = 30000000;
 	private const int MAX_HEIGHT = 4096;
+	private const int MAX_KNOWN_ITEMS = 1024;
+	private const int MAX_KNOWN_ITEM_BYTES = 4096;
+	private const int MAX_SHARED_SKINS = 256;
 
 	private const int FLAG_NAME_VISIBLE = 0;
 	private const int FLAG_INVISIBLE = 1;
@@ -50,20 +55,23 @@ final class StateCodec{
 	private const int FLAG_INVULNERABLE = 4;
 	private const int FLAG_CANCEL_INTERACTIONS = 5;
 
+	/**
+	 * Skins never change, so each object is encoded once and its NPCs share the strings
+	 * @var WeakMap<Skin, list<string>>|null
+	 */
+	private static ?WeakMap $encodedSkins = null;
+	/** @var array<string, WeakReference<Skin>> */
+	private static array $sharedSkins = [];
+	/** @var array<string, true> */
+	private static array $knownItems = [];
+
 	/** @return State */
 	public static function capture(Npc $npc, string $type) : array{
 		$location = $npc->getLocation();
 		$skin = [];
 		$items = [];
 		if($npc instanceof PlayerNpc){
-			$source = $npc->getSkin();
-			$skin = array_map(base64_encode(...), [
-				$source->getSkinId(),
-				$source->getSkinData(),
-				$source->getCapeData(),
-				$source->getGeometryName(),
-				$source->getGeometryData()
-			]);
+			$skin = self::encodeSkin($npc->getSkin());
 			$items = [$npc->getMainHand(), $npc->getOffHand()];
 		}
 		if($npc instanceof PlayerNpc || $npc instanceof ZombieNpc){
@@ -90,11 +98,14 @@ final class StateCodec{
 			'sneaking' => $npc instanceof PlayerNpc && $npc->isSneaking(),
 			'skin' => $skin,
 			'items' => array_map(self::encodeItem(...), $items)
-		]);
+		], true);
 	}
 
-	/** @return State */
-	public static function validate(mixed $data) : array{
+	/**
+	 * @param bool $trustedSkin the caller already checked this skin
+	 * @return State
+	 */
+	public static function validate(mixed $data, bool $trustedSkin = false) : array{
 		if(!is_array($data)){ throw new UnexpectedValueException('Invalid NPC record'); }
 		$position = $data['position'] ?? null;
 		$flags = $data['flags'] ?? null;
@@ -116,10 +127,9 @@ final class StateCodec{
 			default => 0
 		};
 		if(count($skin) !== $expectedSkin || count($items) !== $expectedItems){ throw new UnexpectedValueException('NPC type payload mismatch'); }
-		$skin = array_map(static fn(mixed $value) : string => self::text($value, self::MAX_BLOB), $skin);
-		if($type === 'player'){ self::decodeSkin($skin); }
-		$items = array_map(static fn(mixed $value) : string => self::text($value, self::MAX_ITEM), $items);
-		foreach($items as $item){ self::decodeItem($item); }
+		/** @var list<string> $skin */
+		if(!$trustedSkin && $type === 'player'){ $skin = self::validateSkin($skin); }
+		$items = array_map(static fn(mixed $value) : string => self::checkItem(self::text($value, self::MAX_ITEM)), $items);
 		$profession = $data['profession'] ?? null;
 		if(!is_int($profession) || $profession < 0 || $profession > 4){ throw new UnexpectedValueException('Invalid NPC profession'); }
 		return [
@@ -149,6 +159,14 @@ final class StateCodec{
 			'skin' => $skin,
 			'items' => $items
 		];
+	}
+
+	/** @return list<string> */
+	public static function validateSkin(mixed $parts) : array{
+		if(!self::isList($parts, 5)){ throw new UnexpectedValueException('Invalid NPC skin'); }
+		$skin = array_map(static fn(mixed $value) : string => self::text($value, self::MAX_BLOB), $parts);
+		self::decodeSkin($skin);
+		return $skin;
 	}
 
 	/**
@@ -224,18 +242,56 @@ final class StateCodec{
 
 	/** @param list<string> $parts */
 	private static function decodeSkin(array $parts) : Skin{
-		return new Skin(
+		$key = hash('xxh128', implode("\0", $parts));
+		$shared = (self::$sharedSkins[$key] ?? null)?->get();
+		if($shared !== null){ return $shared; }
+		$skin = new Skin(
 			self::binary($parts[0]),
 			self::binary($parts[1]),
 			self::binary($parts[2]),
 			self::binary($parts[3]),
 			self::binary($parts[4])
 		);
+		if(count(self::$sharedSkins) >= self::MAX_SHARED_SKINS){
+			self::$sharedSkins = array_filter(self::$sharedSkins, static fn(WeakReference $reference) : bool => $reference->get() !== null);
+		}
+		self::$sharedSkins[$key] = WeakReference::create($skin);
+		self::$encodedSkins ??= new WeakMap();
+		self::$encodedSkins[$skin] = $parts;
+		return $skin;
+	}
+
+	/** @return list<string> */
+	private static function encodeSkin(Skin $skin) : array{
+		self::$encodedSkins ??= new WeakMap();
+		$known = self::$encodedSkins[$skin] ?? null;
+		if($known !== null){ return $known; }
+		$parts = array_map(base64_encode(...), [
+			$skin->getSkinId(),
+			$skin->getSkinData(),
+			$skin->getCapeData(),
+			$skin->getGeometryName(),
+			$skin->getGeometryData()
+		]);
+		$parts = self::validateSkin($parts);
+		// decoding this same skin later must find these strings too
+		return self::$encodedSkins[$skin] = $parts;
 	}
 
 	private static function encodeItem(Item $item) : string{
 		if($item->isNull()){ return ''; }
 		return base64_encode((new LittleEndianNbtSerializer())->write(new TreeRoot($item->nbtSerialize())));
+	}
+
+	// a file that can't be read back would lose every NPC, so each distinct item is decoded once
+	private static function checkItem(string $encoded) : string{
+		if($encoded === '' || isset(self::$knownItems[$encoded])){ return $encoded; }
+		self::decodeItem($encoded);
+		if(strlen($encoded) <= self::MAX_KNOWN_ITEM_BYTES){
+			if(count(self::$knownItems) >= self::MAX_KNOWN_ITEMS){ self::$knownItems = []; }
+			self::$knownItems[$encoded] = true;
+		}
+		return $encoded;
 	}
 
 	private static function decodeItem(string $encoded) : Item{

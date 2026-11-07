@@ -6,6 +6,10 @@ namespace NpcLib\internal\persistence;
 
 use AttachableLogger;
 use NpcLib\npc\Npc;
+use quark\scheduler\ClosureTask;
+use quark\scheduler\TaskHandler;
+use quark\scheduler\TaskScheduler;
+use quark\Server;
 use quark\world\World;
 use RuntimeException;
 use Throwable;
@@ -15,6 +19,8 @@ use Throwable;
  * @phpstan-import-type State from StateCodec
  */
 final class DefinitionStore{
+	private const int FLUSH_RETRY_TICKS = 600;
+
 	/** @var array<string, State> */
 	private array $dormant = [];
 	/** @var array<string, array<string, true>> */
@@ -38,8 +44,12 @@ final class DefinitionStore{
 	private array $revisions = [];
 	private int $sequence = 0;
 	private bool $closed = false;
+	private bool $dirty = false;
+	private int $lastDiscardTick = -1;
+	/** @var TaskHandler<ClosureTask>|null */
+	private ?TaskHandler $flushTask = null;
 
-	public function __construct(private readonly DefinitionFile $file, private ?AttachableLogger $logger){
+	public function __construct(private readonly DefinitionFile $file, private ?AttachableLogger $logger, private ?TaskScheduler $scheduler){
 		foreach($file->load() as $id => $state){
 			$this->putDormant($id, $state);
 			$this->revisions[$id] = ++$this->sequence;
@@ -47,6 +57,8 @@ final class DefinitionStore{
 	}
 
 	public function isClosed() : bool{ return $this->closed; }
+
+	public function writes() : int{ return $this->file->writes(); }
 
 	public static function chunkKey(string $world, int $x, int $z) : string{ return $world . ':' . $x . ':' . $z; }
 
@@ -76,16 +88,12 @@ final class DefinitionStore{
 
 	public function revision(string $id) : ?int{ return $this->revisions[$id] ?? null; }
 
-	public function hasActiveIn(World $world, ?int $x = null, ?int $z = null) : bool{
-		foreach($this->active as [$npc]){
-			$at = $npc->getLocation();
-			if($at->getWorld() === $world && ($x === null || ($at->getFloorX() >> 4) === $x && ($at->getFloorZ() >> 4) === $z)){ return true; }
-		}
-		return false;
-	}
-
 	public function hasDefinitionIn(World $world, int $x, int $z) : bool{
-		return $this->hasActiveIn($world, $x, $z) || isset($this->dormantChunks[self::chunkKey($world->getFolderName(), $x, $z)]);
+		// the world already tracks entities per chunk, moves included, so no second index to keep in sync
+		foreach($world->getChunkEntities($x, $z) as $runtimeId => $_){
+			if(isset($this->runtime[$runtimeId])){ return true; }
+		}
+		return $this->dormantChunks !== [] && isset($this->dormantChunks[self::chunkKey($world->getFolderName(), $x, $z)]);
 	}
 
 	/**
@@ -111,12 +119,23 @@ final class DefinitionStore{
 		if($stale !== []){ throw new RuntimeException('NPC snapshot failure; kept last good state of: ' . implode(', ', $stale)); }
 	}
 
+	public function flush() : void{
+		if($this->closed || !$this->dirty){ return; }
+		try{
+			$this->write();
+		}catch(Throwable $error){
+			$this->logger?->error('NPC definitions could not be saved, retrying: ' . $error->getMessage());
+			$this->scheduleFlush(self::FLUSH_RETRY_TICKS);
+		}
+	}
+
 	/** @param array<string, array{Npc, string, State}> $staged */
 	public function commit(array $staged) : void{
 		$records = $this->records();
 		foreach($staged as $id => [, , $state]){ $records[$id] = $state; }
 		// nothing changes in memory unless the file write works
 		$this->file->save($records);
+		$this->dirty = false;
 		foreach($staged as $id => [$npc, $type, $state]){
 			$this->active[$id] = [$npc, $type];
 			$this->snapshots[$id] = $state;
@@ -131,6 +150,7 @@ final class DefinitionStore{
 		unset($records[$id]);
 		// explicit deletions stay durable, a failure leaves the definition with its owner
 		$this->file->save($records);
+		$this->dirty = false;
 		$active = $this->active[$id] ?? null;
 		unset($this->active[$id], $this->snapshots[$id], $this->revisions[$id], $this->quarantined[$id], $this->snapshotErrors[$id]);
 		$this->dropDormant($id);
@@ -159,25 +179,35 @@ final class DefinitionStore{
 	public function releaseQuarantine() : void{ $this->quarantined = []; }
 
 	public function suspend(string $id, Npc $npc) : void{
+		$written = $this->snapshots[$id] ?? throw new RuntimeException('Missing NPC snapshot ' . $id);
 		// native close can't take an exception from us, refresh only logs
 		$this->refresh($id);
-		$state = $this->snapshots[$id] ?? throw new RuntimeException('Missing NPC snapshot ' . $id);
+		$state = $this->snapshots[$id];
 		unset($this->active[$id], $this->snapshots[$id], $this->runtime[$npc->getId()], $this->snapshotErrors[$id]);
 		$this->putDormant($id, $state);
+		// the definition is already on disk, only a changed state is worth a write and it can wait a tick
+		if($state !== $written){ $this->scheduleFlush(1); }
 	}
 
+	/**
+	 * Death or a close by another plugin. The first one of a tick is written now so a crash can't
+	 * bring it back, a burst shares one more write on the next tick.
+	 */
 	public function discard(string $id, Npc $npc) : void{
 		$this->forget($id, $npc);
-		try{
-			$this->write();
-		}catch(Throwable $error){
-			$this->logger?->error('NPC definition ' . $id . ' could not be removed after its entity closed: ' . $error->getMessage());
+		$tick = Server::getInstance()->getTick();
+		if($tick === $this->lastDiscardTick){
+			$this->scheduleFlush(1);
+			return;
 		}
+		$this->lastDiscardTick = $tick;
+		$this->flush();
 	}
 
 	public function dispose() : void{
 		$this->closed = true;
-		$this->logger = null;
+		$this->flushTask?->cancel();
+		$this->flushTask = null; $this->scheduler = null; $this->logger = null; $this->dirty = false;
 		$this->active = []; $this->snapshots = []; $this->runtime = []; $this->dormant = []; $this->dormantChunks = []; $this->dormantKeys = [];
 		$this->quarantined = []; $this->snapshotErrors = []; $this->revisions = [];
 		$this->file->close();
@@ -185,6 +215,7 @@ final class DefinitionStore{
 
 	private function forget(string $id, Npc $npc) : void{
 		unset($this->active[$id], $this->snapshots[$id], $this->runtime[$npc->getId()], $this->revisions[$id], $this->quarantined[$id], $this->snapshotErrors[$id]);
+		$this->dirty = true;
 	}
 
 	/** @return array<string, State> */
@@ -192,6 +223,7 @@ final class DefinitionStore{
 
 	private function write() : void{
 		$this->file->save($this->records());
+		$this->dirty = false;
 	}
 
 	private function refresh(string $id) : bool{
@@ -208,6 +240,14 @@ final class DefinitionStore{
 			}
 			return false;
 		}
+	}
+
+	private function scheduleFlush(int $delay) : void{
+		$this->dirty = true;
+		$this->flushTask ??= $this->scheduler?->scheduleDelayedTask(new ClosureTask(function() : void{
+			$this->flushTask = null;
+			$this->flush();
+		}), $delay);
 	}
 
 	/** @param State $state */

@@ -550,7 +550,8 @@ final class PersistenceSuite{
 			$fragile->damage(1.0);
 			$other->setName('Other renamed');
 			$world->unloadChunk(1, 0, false);
-			$plugin->getScheduler()->scheduleDelayedTask(new ClosureTask(function() use ($manager, $store, $world, $file, $report) : void{
+			$this->check(!str_contains((string) file_get_contents($file), 'Other renamed'), 'chunk unload does not write during the unload');
+			$plugin->getScheduler()->scheduleDelayedTask(new ClosureTask(function() use ($plugin, $manager, $store, $world, $file, $report) : void{
 				$failure = null;
 				try{
 					$this->check(str_contains((string) file_get_contents($file), 'Other renamed'), 'chunk unload state reaches the file on the next ticks');
@@ -561,10 +562,39 @@ final class PersistenceSuite{
 					$this->check($store->get('other')?->getName() === 'Other renamed', 'unloaded npc returns with its captured state');
 					foreach($store->ids() as $id){ $store->delete($id); }
 					$manager->close();
+					$this->sharedSkins($plugin, $world, $file);
 				}catch(Throwable $error){ $failure = $error::class . ': ' . $error->getMessage(); }
 				finally{ if(!$manager->isClosed()){ $manager->close(); } }
 				$report($failure);
 			}), 3);
 		}catch(Throwable $error){ $manager->close(); $report($error::class . ': ' . $error->getMessage()); }
+	}
+
+	private function sharedSkins(PluginBase $plugin, World $world, string $file) : void{
+		$manager = new NpcManager($plugin);
+		try{
+			$store = $manager->enablePersistence(static function() : void{});
+			$skin = new Skin('shared-test', str_repeat("\xff\xfe\xfd\xff", 4096));
+			$store->rememberBatch([
+				'first' => ['npc' => $manager->createPlayer(new Location(8, 16, 8, $world, 0, 0), $skin, 'First')],
+				'second' => ['npc' => $manager->createPlayer(new Location(9, 16, 8, $world, 0, 0), $skin, 'Second')],
+				'other' => ['npc' => $manager->createPlayer(new Location(10, 16, 8, $world, 0, 0), new Skin('other-test', str_repeat("\x01\x02\x03\xff", 4096)), 'Other')]
+			]);
+			$data = json_decode((string) file_get_contents($file), true, 32, JSON_THROW_ON_ERROR);
+			$this->check(is_array($data) && $data['version'] === 2 && is_array($data['skins']) && count($data['skins']) === 2, 'npcs sharing a skin store it once');
+			$poisoned = $store->get('other') ?? throw new RuntimeException('Missing other');
+			$poisoned->setName(str_repeat('z', 4097));
+			$manager->close();
+			$this->check($manager->isClosed(), 'closing with an invalid npc does not throw');
+			$manager = new NpcManager($plugin);
+			$store = $manager->enablePersistence(static function() : void{});
+			$store->restore();
+			$first = $store->get('first'); $second = $store->get('second');
+			$this->check(
+				$first instanceof PlayerNpc && $second instanceof PlayerNpc && $first->getSkin() === $second->getSkin() && $first->getSkin()->getSkinData() === $skin->getSkinData() && $store->get('other')?->getName() === 'Other',
+				'restored npcs share one skin object and the invalid one keeps its last good name'
+			);
+			foreach($store->ids() as $id){ $store->delete($id); }
+		}finally{ $manager->close(); }
 	}
 }
